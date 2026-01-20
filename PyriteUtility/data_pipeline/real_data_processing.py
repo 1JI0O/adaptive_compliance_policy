@@ -44,7 +44,7 @@ def image_read(rgb_dir, rgb_file_list, i, output_data_rgb, output_data_rgb_time_
     try:
         # time_img_ms = float(img_name.split('.')[0])
         time_img_ms = int(img_name.split('.')[0])
-        output_data_rgb_time_stamps[i] = time_img_ms
+        output_data_rgb_time_stamps[i] = float(time_img_ms)
     except ValueError:
         print(f"Error: Could not parse timestamp from {img_name}")
         return False
@@ -99,9 +99,9 @@ id_list = [0]  # single robot
 # id_list = [0, 1] # bimanual
 
 input_dir = pathlib.Path(
-    os.environ.get("PYRITE_RAW_DATASET_FOLDERS") + "/flip_up_new_v5"
+    os.environ.get("PYRITE_RAW_DATASET_FOLDERS") + "/flip_v3"
 )
-output_dir = pathlib.Path(os.environ.get("PYRITE_DATASET_FOLDERS") + "/flip_up_new_v5")
+output_dir = pathlib.Path(os.environ.get("PYRITE_DATASET_FOLDERS") + "/flip_new_v3")
 
 robot_timestamp_dir = output_dir.joinpath("robot_timestamp")
 wrench_timestamp_dir = output_dir.joinpath("wrench_timestamp")
@@ -157,7 +157,7 @@ if os.path.exists(output_dir):
 store = zarr.DirectoryStore(path=output_dir)
 root = zarr.open(store=store, mode="a")
 
-input_dir='/data/haoxiang/acp/flip_v3'
+# input_dir='/data/haoxiang/acp/flip_v3'
 print("Reading data from input_dir: ", input_dir)
 episode_names = os.listdir(input_dir)
 
@@ -176,7 +176,7 @@ def process_one_episode(root, episode_name, input_dir, id_list):
     # 这个考虑修改上面那个路径读取逻辑
     # scene_0001
 
-    episode_id = episode_name[6:]
+    episode_id = int(episode_name[6:])
     print(f"scene_name: {episode_name}, scene_id: {episode_id}")
     episode_dir = input_dir.joinpath(episode_name)
 
@@ -276,14 +276,15 @@ def process_one_episode(root, episode_name, input_dir, id_list):
     # 不过既然我们的数据时间戳是统一的，其实也不用他这里这么麻烦
     time_offsets = []
     for id in id_list:
-        time_offsets.append(data_rgb_time_stamps[id][0])
-        time_offsets.append(data_robot_time_stamps[id][0])
-        time_offsets.append(data_wrench_time_stamps[id][0])
+        time_offsets.append(float(data_rgb_time_stamps[id][0]))
+        time_offsets.append(float(data_robot_time_stamps[id][0]))
+        time_offsets.append(float(data_wrench_time_stamps[id][0]))
     time_offset = np.min(time_offsets)
     for id in id_list:
-        data_rgb_time_stamps[id] -= time_offset
-        data_robot_time_stamps[id] -= time_offset
-        data_wrench_time_stamps[id] -= time_offset
+        # 不要使用 -=，直接重新赋值，这样 NumPy 会允许类型转换
+        data_rgb_time_stamps[id] = data_rgb_time_stamps[id].astype(np.float64) - time_offset
+        data_robot_time_stamps[id] = data_robot_time_stamps[id].astype(np.float64) - time_offset
+        data_wrench_time_stamps[id] = data_wrench_time_stamps[id].astype(np.float64) - time_offset
 
     # create output zarr
     print(f"Saving everything to : {output_dir}")

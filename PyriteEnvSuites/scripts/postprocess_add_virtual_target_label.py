@@ -2,8 +2,13 @@ import zarr
 import numpy as np
 import sys
 import os
+import matplotlib
+# 放弃 Qt5，改用 Tk
+matplotlib.use('TkAgg') 
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+
+# print(f"Current DISPLAY: {os.environ.get('DISPLAY')}")
 
 SCRIPT_PATH = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.join(SCRIPT_PATH, "../../"))
@@ -26,19 +31,29 @@ if "PYRITE_DATASET_FOLDERS" not in os.environ:
 dataset_folder_path = os.environ.get("PYRITE_DATASET_FOLDERS")
 
 # Config for flip up (single robot)
-dataset_path = dataset_folder_path + "/flip_up_new_v5/"
+dataset_path = dataset_folder_path + "/flip_new_v3/"
 id_list = [0]
+
+# 定义一个保存图片的文件夹
+VIS_OUTPUT_DIR = dataset_path + "vis_plots/"
+if not os.path.exists(VIS_OUTPUT_DIR):
+    os.makedirs(VIS_OUTPUT_DIR)
 
 # # Config for vase wiping (bimanual)
 # dataset_path = dataset_folder_path + "/vase_wiping_v6.3/"
 # id_list = [0, 1]
 
-wrench_moving_average_window_size = 7000  # should be around 1s of data
+# 这个窗口也要改
+wrench_moving_average_window_size = 15  # should be around 1s of data
 buffer = zarr.open(dataset_path, mode="r+")
 
+# num_of_process = 5
+# flag_plot = False
 num_of_process = 5
 flag_plot = False
-fin_every_n = 50
+fin_every_n = 10
+
+# 我怀疑这里需要改
 
 stiffness_estimation_para = {
     # penetration estimator
@@ -51,9 +66,11 @@ stiffness_estimation_para = {
     "vel_tol": 999.002,  # (not using) vel larger than this will trigger stiffness adjustment
 }
 
-flag_real = False
-if "real" in dataset_path:
-    flag_real = True
+# 我们的数据和原作采集的不一样
+# flag_real = False
+# if "real" in dataset_path:
+#     flag_real = True
+flag_real = True
 
 if flag_plot:
     assert num_of_process == 1, "Plotting is not supported for multi-process"
@@ -68,7 +85,8 @@ def process_episode(ep, ep_data, id_list):
         wrench_moving_average = np.zeros_like(wrench)
 
         # remove wrench measurement offset
-        Noffset = 200
+        # 这个硬编码的也要改
+        Noffset = 10
         wrench_offset = np.mean(wrench[:Noffset], axis=0)
         print("wrench offset: ", wrench_offset)
 
@@ -80,7 +98,7 @@ def process_episode(ep, ep_data, id_list):
         N = wrench_moving_average_window_size
         print("Computing moving average")
         # fmt: off
-        wrench_moving_average[:, 0] = np.convolve(wrench[:, 0], np.ones(N) / N, mode="same")
+        wrench_moving_average[:, 0] = np.convolve(wrench[:, 0], np.ones(N) / N, mode="same") # 这些mode=same，看情况修改
         wrench_moving_average[:, 1] = np.convolve(wrench[:, 1], np.ones(N) / N, mode="same")
         wrench_moving_average[:, 2] = np.convolve(wrench[:, 2], np.ones(N) / N, mode="same")
         wrench_moving_average[:, 3] = np.convolve(wrench[:, 3], np.ones(N) / N, mode="same")
@@ -129,7 +147,8 @@ def process_episode(ep, ep_data, id_list):
                 wrench_T = SE3_ST.Ad().T @ wrench_S
 
             # compute velocity twist
-            half_window_size = 10
+            # 这个窗口尺寸也要改
+            half_window_size = 3
             id_start = max(0, t - half_window_size)
             id_end = min(num_robot_time_steps - 1, t + half_window_size)
             window_size = id_end - id_start
@@ -154,6 +173,8 @@ def process_episode(ep, ep_data, id_list):
         ep_data[f"ts_pose_virtual_target_{id}"] = ts_pose_virtual_target
         ep_data[f"stiffness_{id}"] = stiffness
         print("Done")
+
+        # 我怀疑下面这个可视化也要改
 
         if flag_plot:
             print("Plotting...")
@@ -236,9 +257,15 @@ def process_episode(ep, ep_data, id_list):
 
             set_axes_equal(ax)
 
-            plt.draw()
+            # plt.draw()
+
+            save_path = os.path.join(VIS_OUTPUT_DIR, f"{ep}_id{id}.png")
+            plt.savefig(save_path)
+            plt.close(fig) # 必须显式关闭，否则内存会爆
+            print(f"Plot saved to: {save_path}")
+
             input("Press Enter to continue...")
-            return True
+        return True
 
 
 if num_of_process == 1:

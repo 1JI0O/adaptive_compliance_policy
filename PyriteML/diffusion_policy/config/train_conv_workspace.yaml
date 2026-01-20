@@ -1,7 +1,7 @@
 defaults:
   - _self_
   # - task: vase_wiping_conv.yaml
-  - task: flip_up_conv.yaml
+  - task: flip_new_v3_conv.yaml
 
 name: conv_230
 output_dir: ${oc.env:PYRITE_CHECKPOINT_FOLDERS}
@@ -54,7 +54,7 @@ policy:
       global_pool: ''
 
       # 'avg' or 'max' or 'soft_attention' or 'spatial_embedding' or 'transformer' or 'attention_pool_2d'
-      feature_aggregation: 'attention_pool_2d'
+      feature_aggregation: 'avg'
       # feature_aggregation: null
       position_encoding: null
 
@@ -175,7 +175,7 @@ training:
 logging:
   project: hierarchical-policy
   resume: False
-  mode: online
+  mode: offline
   name: ${now:%Y.%m.%d-%H.%M.%S}_${task_name}_${name}
   tags: ["${name}", "${task_name}", "${exp_name}"]
   id: null
