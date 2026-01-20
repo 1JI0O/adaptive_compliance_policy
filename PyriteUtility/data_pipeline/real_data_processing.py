@@ -31,6 +31,8 @@ def image_read(rgb_dir, rgb_file_list, i, output_data_rgb, output_data_rgb_time_
     # convert BGR to RGB for imageio
     output_data_rgb[i] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     time_img_ms = float(img_name[11:22])
+    # img_000695_29345.186724_ms
+    # 这里提取出了拍摄时间
     output_data_rgb_time_stamps[i] = time_img_ms
     return True
 
@@ -172,16 +174,18 @@ def process_one_episode(root, episode_name, input_dir, id_list):
         "order": 5,
     }
     ft_filter = LiveLPFilter(
-        fs=500,
-        cutoff=5,
-        order=5,
-        dim=6,
+        fs=500,      # 采样频率 (Sampling Frequency) 为 500Hz
+        cutoff=5,    # 截止频率 (Cutoff Frequency) 为 5Hz
+        order=5,     # 滤波器阶数 (Order)
+        dim=6,       # 维度 (Dimension) 为 6
     )
     data_wrench_filtered = []
     for id in id_list:
         data_wrench_filtered.append(np.array([ft_filter(y) for y in data_wrench[id]]))
 
     # make time stamps start from zero
+    # 这一部分让大数变小，同时让时间都从以0为参考值
+    # 即使开始记录的时间不一样，至少有一个时间戳数组从0开始，其他的应该也接近0
     time_offsets = []
     for id in id_list:
         time_offsets.append(data_rgb_time_stamps[id][0])

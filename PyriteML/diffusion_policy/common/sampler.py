@@ -189,6 +189,7 @@ class SequenceSampler:
 
             # find the query id for the query time
             if "rgb" in key:
+                # 可能不止一个相机，而且也是为了逻辑统一
                 query_id = np.searchsorted(
                     data_episode["obs"][f"rgb_time_stamps_{id}"], query_time
                 )

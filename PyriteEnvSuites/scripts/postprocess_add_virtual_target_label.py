@@ -55,6 +55,8 @@ flag_real = False
 if "real" in dataset_path:
     flag_real = True
 
+# 这个判断real的逻辑可以删了
+
 if flag_plot:
     assert num_of_process == 1, "Plotting is not supported for multi-process"
 
@@ -68,9 +70,12 @@ def process_episode(ep, ep_data, id_list):
         wrench_moving_average = np.zeros_like(wrench)
 
         # remove wrench measurement offset
-        Noffset = 200
+        Noffset = 200 # 取前200个样本求平均，作为抵消偏置
         wrench_offset = np.mean(wrench[:Noffset], axis=0)
+        # 这里可能需要前200个样本不能动，不能受力
         print("wrench offset: ", wrench_offset)
+        
+        # wrench_offset 只出现在这里，说明这段代码没用
 
         # # FT300 only: flip the sign of the wrench
         # for i in range(6):
@@ -79,8 +84,11 @@ def process_episode(ep, ep_data, id_list):
         # filter wrench using moving average
         N = wrench_moving_average_window_size
         print("Computing moving average")
+        # 这个fmt是告诉解释器不要格式化代码
         # fmt: off
-        wrench_moving_average[:, 0] = np.convolve(wrench[:, 0], np.ones(N) / N, mode="same")
+        wrench_moving_average[:, 0] = np.convolve(wrench[:, 0], np.ones(N) / N, mode="same") 
+        # 由于这里是same模式，而且N比较大，在一段录像的开头和结尾，滤波后的数据是不准的（因为窗口里有一部分是空的）
+        # 所以建议开始和结尾静止一会
         wrench_moving_average[:, 1] = np.convolve(wrench[:, 1], np.ones(N) / N, mode="same")
         wrench_moving_average[:, 2] = np.convolve(wrench[:, 2], np.ones(N) / N, mode="same")
         wrench_moving_average[:, 3] = np.convolve(wrench[:, 3], np.ones(N) / N, mode="same")
