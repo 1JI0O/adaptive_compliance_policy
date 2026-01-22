@@ -1,0 +1,7 @@
+deploy:
+  agent:
+    robot_serial: Rizon4-062077 # 这个地方需要改！
+    camera_serial: "104122063550" 
+    inhand_camera_serial: "043322070878"
+    gripper_port: /dev/ttyUSB0
+    gripper_key: width

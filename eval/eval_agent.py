@@ -2,18 +2,28 @@
 Evaluation Agent.
 """
 
-ROOT_DIR = str(pathlib.Path(__file__).parent.parent)
+import os
+import sys
+import pathlib
+
+# 1. 算出根目录
+ROOT_DIR = str(pathlib.Path(__file__).parent.parent.absolute())
+# 2. 算出 PyriteML 所在的目录
+PYRITE_ML_DIR = os.path.join(ROOT_DIR, 'PyriteML')
+
+# 将这两个都加入环境变量
 sys.path.append(ROOT_DIR)
+sys.path.append(PYRITE_ML_DIR)
 
 if __name__ == "__main__":
     os.chdir(ROOT_DIR)
 
 import time
 import numpy as np
-from eval.device.arm import FlexivArm
+from eval.device.flexiv_arm import FlexivArm
 from eval.device.camera import RealSenseRGBDCamera
 from eval.utils.transformation import xyz_rot_transform
-from eval.device.gripper import Robotiq2F85Gripper, DahuanAG95Gripper
+from eval.device.flexiv_gripper import FlexivGripper
 
 
 class SingleArmAgent:
@@ -36,7 +46,7 @@ class SingleArmAgent:
     ):
         # initialize
         self.robot = FlexivArm(robot_serial)
-        self.gripper = DahuanAG95Gripper(gripper_port)
+        self.gripper = FlexivGripper(gripper_port)
         self.camera_serial = camera_serial
         self.camera = RealSenseRGBDCamera(serial = camera_serial)
         self.intrinsics = self.camera.get_intrinsic()
@@ -95,16 +105,18 @@ class SingleArmAgent:
             return proprio
 
     def get_wrench()
-        pass
-        # 这个需要根据机器人本身实现
+        wrench = self.robot.get_force_torque_tcp()
+        return wrench
 
-    def action(self, action, rotation_rep = "rotation_6d", rotation_rep_convention = None):
+    def action(self, action,stiffness_vector, rotation_rep = "rotation_6d", rotation_rep_convention = None):
         tcp_pose = xyz_rot_transform(
             action[: 9],
             from_rep = rotation_rep, 
             to_rep = "quaternion",
             from_convention = rotation_rep_convention
         )
+
+        self.robot.set_cartesian_impedance(stiffness_vector)
 
         self.robot.send_tcp_pose(
             tcp_pose,
@@ -115,14 +127,14 @@ class SingleArmAgent:
         )
         time.sleep(0.1)
         
-        gripper_action = False
-        if abs(action[9] - self.last_gripper) >= 0.01:
-            self.gripper.set_width(action[9])
-            self.last_gripper = action[9]        
-            gripper_action = True
+        # gripper_action = False
+        # if abs(action[9] - self.last_gripper) >= 0.01:
+        #     self.gripper.set_width(action[9])
+        #     self.last_gripper = action[9]        
+        #     gripper_action = True
 
-        if gripper_action:
-            time.sleep(0.5)
+        # if gripper_action:
+        #     time.sleep(0.5)
 
     
     def stop(self):

@@ -1,5 +1,15 @@
-ROOT_DIR = str(pathlib.Path(__file__).parent.parent)
+"""
+Evaluation.
+"""
+
+# 1. 算出根目录
+ROOT_DIR = str(pathlib.Path(__file__).parent.parent.absolute())
+# 2. 算出 PyriteML 所在的目录
+PYRITE_ML_DIR = os.path.join(ROOT_DIR, 'PyriteML')
+
+# 将这两个都加入环境变量
 sys.path.append(ROOT_DIR)
+sys.path.append(PYRITE_ML_DIR)
 
 if __name__ == "__main__":
     os.chdir(ROOT_DIR)
@@ -28,11 +38,11 @@ from PyriteML.diffusion_policy.policy.diffusion_unet_timm_mod1_policy import (
 from PyriteML.diffusion_policy.dataset.base_dataset import BaseImageDataset, BaseDataset
 
 # from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
-from PyriteML.diffusion_policy.common.checkpoint_util import TopKCheckpointManager
-from PyriteML.diffusion_policy.common.json_logger import JsonLogger
-from PyriteML.diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
-from PyriteML.diffusion_policy.model.diffusion.ema_model import EMAModel
-from PyriteML.diffusion_policy.model.common.lr_scheduler import get_scheduler
+from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
+from diffusion_policy.common.json_logger import JsonLogger
+from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
+from diffusion_policy.model.diffusion.ema_model import EMAModel
+from diffusion_policy.model.common.lr_scheduler import get_scheduler
 from accelerate import Accelerator
 
 from eval.eval_agent import SingleArmAgent
@@ -58,6 +68,7 @@ sparse_action_horizon: 16
 yaml_path = "PyriteML/diffusion_policy/config/train_conv_workspace.yaml"
 ckpt_path = "/data/haoxiang/logs/acp_logs/2026.01.20_04.50.05_flip_new_v3_conv_230/checkpoints/latest.ckpt"
 max_steps = 3000
+eval_config_path = "/home/haoxiang/adaptive_compliance_policy/eval/eval_config.yaml"
 
 n_action_steps = 8  
 
@@ -82,6 +93,10 @@ def evaluate():
     cfg = OmegaConf.load(yaml_path)
     policy = hydra.utils.instantiate(cfg.policy)
 
+    with open(eval_config_path, "r") as f:
+        eval_config = edict(yaml.load(f, Loader = yaml.FullLoader))
+        # 这个主要是agent相关的config
+
     # load checkpoint
     ckpt = torch.load(ckpt_path, map_location='cpu')
     if "state_dicts" in ckpt:
@@ -93,10 +108,9 @@ def evaluate():
     # set evaluation
     policy.eval()
 
-    # evaluation
+    # initialize agent
     Agent = SingleArmAgent
-    agent = Agent(**config.deploy.agent)
-
+    agent = Agent(**eval_config.deploy.agent)
 
     # evaluation rollout
     print("Ready for rollout. Press Enter to continue...")
@@ -172,16 +186,26 @@ def evaluate():
             vt_pos = raw_action[9:12]
             vt_rot_6d = raw_action[12:18]
 
+            # get step_actiion
+            step_action = raw_action[9:18]
+
             # Slice 3: Stiffness
             stiffness_val = raw_action[18]
 
+            # process stiffness
+            k_trans = 200.0 + stiffness_val * (2000.0 - 200.0)
+            k_rot = 30.0 + stiffness_val * (100.0 - 30.0)
+            stiffness_vector = [k_trans, k_trans, k_trans, k_rot, k_rot, k_rot]
+
             # 接下来需要把数据（处理后）传给agent
-            # agent.action(step_action, rotation_rep = "rotation_6d")
-            # time.sleep(0.1) 在 action 有
+            agent.action(step_action,stiffness_vector ,rotation_rep = "rotation_6d")
+            # time.sleep(0.1) 在 action 
+            # 可能有点长了，也可以把sleep放在这里
     
         agent.stop()
 
 
 if __name__ == '__main__':
+    reset_buffers()
     evaluate()
     # 考虑改成传参数的调用方法
