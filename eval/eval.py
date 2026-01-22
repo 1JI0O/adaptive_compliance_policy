@@ -193,12 +193,18 @@ def evaluate():
             stiffness_val = raw_action[18]
 
             # process stiffness
+
+            # 映射到 200-2000
             k_trans = 200.0 + stiffness_val * (2000.0 - 200.0)
-            k_rot = 30.0 + stiffness_val * (100.0 - 30.0)
+
+            # 范围映射到 [100, 200]
+            k_rot = 100.0 + stiffness_val * (200.0 - 100.0)
+            
             stiffness_vector = [k_trans, k_trans, k_trans, k_rot, k_rot, k_rot]
 
             # 接下来需要把数据（处理后）传给agent
             agent.action(step_action,stiffness_vector ,rotation_rep = "rotation_6d")
+
             # time.sleep(0.1) 在 action 
             # 可能有点长了，也可以把sleep放在这里
     
