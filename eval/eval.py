@@ -197,9 +197,10 @@ def evaluate():
             # 映射到 200-2000
             k_trans = 200.0 + stiffness_val * (2000.0 - 200.0)
 
-            # 范围映射到 [100, 200]
+            # 范围映射到 [100, 200] 先试试
+            # 原文其实是 150-300，但是硬件不一样
             k_rot = 100.0 + stiffness_val * (200.0 - 100.0)
-            
+
             stiffness_vector = [k_trans, k_trans, k_trans, k_rot, k_rot, k_rot]
 
             # 接下来需要把数据（处理后）传给agent
