@@ -194,14 +194,22 @@ def evaluate():
 
             # process stiffness
 
-            # 映射到 200-2000
-            k_trans = 200.0 + stiffness_val * (2000.0 - 200.0)
+            diff = np.array(vt_pos) - np.array(ref_pos)  # 原始方向向量
+            dist = np.linalg.norm(diff) # 长度
+            
+            if dist < 1e-6:
+                pass
+                # 不能除0, 此处virtual target和ref pose重合
+                # 此时3个方向都应该保持k_high
+            else:   
+                low_stiff_direction = diff / dist
 
-            # 范围映射到 [100, 200] 先试试
-            # 原文其实是 150-300，但是硬件不一样
-            k_rot = 100.0 + stiffness_val * (200.0 - 100.0)
 
-            stiffness_vector = [k_trans, k_trans, k_trans, k_rot, k_rot, k_rot]
+
+
+
+
+
 
             # 接下来需要把数据（处理后）传给agent
             agent.action(step_action,stiffness_vector ,rotation_rep = "rotation_6d")
