@@ -76,19 +76,19 @@ sparse_action_horizon = 16
 
 # 以上这些参数可以从yaml里面读取，先实现主干逻辑
 
-# yaml_path = "/home/flexiv/data/acp/.hydra/config.yaml"
-# ckpt_path = "/home/flexiv/data/acp/latest.ckpt"
-# max_steps = 3000
-# eval_config_path = "/home/flexiv/git/adaptive_compliance_policy/eval/eval_config.yaml"
-# normalizer_path = "/home/flexiv/data/acp/sparse_normalizer.pkl"
-
-color_path = "/data/haoxiang/acp/flip_v3/scene_0001/cam_104122060902/color/1768287143577.png"
-
-yaml_path = "/data/haoxiang/logs/acp_logs/2026.01.20_04.50.05_flip_new_v3_conv_230/.hydra/config.yaml"
-ckpt_path = "/data/haoxiang/logs/acp_logs/2026.01.20_04.50.05_flip_new_v3_conv_230/checkpoints/latest.ckpt"
+yaml_path = "/home/flexiv/data/acp/.hydra/config.yaml"
+ckpt_path = "/home/flexiv/data/acp/latest.ckpt"
 max_steps = 3000
-# eval_config_path = "/home/flexiv/git/adaptive_compliance_policy/eval/eval_config.yaml"
-normalizer_path = "/data/haoxiang/logs/acp_logs/2026.01.20_04.50.05_flip_new_v3_conv_230/sparse_normalizer.pkl"
+eval_config_path = "/home/flexiv/git/adaptive_compliance_policy/eval/eval_config.yaml"
+normalizer_path = "/home/flexiv/data/acp/sparse_normalizer.pkl"
+
+# color_path = "/data/haoxiang/acp/flip_v3/scene_0001/cam_104122060902/color/1768287143577.png"
+
+# yaml_path = "/data/haoxiang/logs/acp_logs/2026.01.20_04.50.05_flip_new_v3_conv_230/.hydra/config.yaml"
+# ckpt_path = "/data/haoxiang/logs/acp_logs/2026.01.20_04.50.05_flip_new_v3_conv_230/checkpoints/latest.ckpt"
+# max_steps = 3000
+# # eval_config_path = "/home/flexiv/git/adaptive_compliance_policy/eval/eval_config.yaml"
+# normalizer_path = "/data/haoxiang/logs/acp_logs/2026.01.20_04.50.05_flip_new_v3_conv_230/sparse_normalizer.pkl"
 
 
 n_action_steps = 8  
@@ -174,8 +174,8 @@ def evaluate():
         # 这个主要是agent相关的config
 
     # # initialize agent
-    # Agent = SingleArmAgent
-    # agent = Agent(**eval_config.deploy.agent)
+    Agent = SingleArmAgent
+    agent = Agent(**eval_config.deploy.agent)
 
     # evaluation rollout
     print("Ready for rollout. Press Enter to continue...")
@@ -187,9 +187,9 @@ def evaluate():
             print(f"Step {t} ---------------------")
            
 
-            # rgb_raw, _ = agent.get_global_observation() # (H_raw, W_raw, 3), uint8
+            rgb_raw, _ = agent.get_global_observation() # (H_raw, W_raw, 3), uint8
 
-            rgb_raw = load_test_obs(color_path)
+            # rgb_raw = load_test_obs(color_path)
 
             # 强制缩放到 224x224 
             # cv2.resize 接受的是 (Width, Height)
