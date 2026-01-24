@@ -189,27 +189,51 @@ class SequenceSampler:
 
             # find the query id for the query time
             if "rgb" in key:
-                # 可能不止一个相机，而且也是为了逻辑统一
-                query_id = np.searchsorted(
-                    data_episode["obs"][f"rgb_time_stamps_{id}"], query_time
-                )
-                found_time = data_episode["obs"][f"rgb_time_stamps_{id}"][query_id]
+                # # 可能不止一个相机，而且也是为了逻辑统一
+                # query_id = np.searchsorted(
+                #     data_episode["obs"][f"rgb_time_stamps_{id}"], query_time
+                # )
+                # found_time = data_episode["obs"][f"rgb_time_stamps_{id}"][query_id]
 
-                if abs(found_time - query_time) > 50.0:
-                    print("processing key: ", key)
-                    print("query_time: ", query_time)
-                    print(
-                        "total time: ",
-                        data_episode["obs"][f"rgb_time_stamps_{id}"][-1],
-                    )
-                    print("query_id: ", query_id)
-                    print(
-                        "total id: ",
-                        len(data_episode["obs"][f"rgb_time_stamps_{id}"]),
-                    )
-                    raise ValueError(
-                        f"[sampler] {episode} Warning: closest rgb data point at {found_time} is far from the query_time {query_time}"
-                    )
+                # if abs(found_time - query_time) > 50.0:
+                #     print("processing key: ", key)
+                #     print("query_time: ", query_time)
+                #     print(
+                #         "total time: ",
+                #         data_episode["obs"][f"rgb_time_stamps_{id}"][-1],
+                #     )
+                #     print("query_id: ", query_id)
+                #     print(
+                #         "total id: ",
+                #         len(data_episode["obs"][f"rgb_time_stamps_{id}"]),
+                #     )
+                #     raise ValueError(
+                #         f"[sampler] {episode} Warning: closest rgb data point at {found_time} is far from the query_time {query_time}"
+                #     )
+
+                if "rgb" in key:
+                    timestamps = data_episode["obs"][f"rgb_time_stamps_{id}"]
+                    
+                    # 🔥 找到最接近 query_time 的索引（nearest neighbor）
+                    time_diffs = np.abs(timestamps[:] - query_time)
+                    query_id = np.argmin(time_diffs)
+                    found_time = timestamps[query_id]
+                    min_time_diff = time_diffs[query_id]
+                    
+                    # 🔥 检查时间差是否在合理范围内
+                    # 相机约 15Hz，帧间隔 ~66ms，允许最大误差 100ms
+                    max_time_diff = 100.0  # milliseconds
+                    
+                    if min_time_diff > max_time_diff:
+                        print(f"[sampler] Warning for {key}:")
+                        print(f"  query_time: {query_time:.1f} ms")
+                        print(f"  found_time: {found_time:.1f} ms")
+                        print(f"  time_diff: {min_time_diff:.1f} ms")
+                        print(f"  total time range: [{timestamps[0]:.1f}, {timestamps[-1]:.1f}] ms")
+                        print(f"  query_id: {query_id}, total frames: {len(timestamps)}")
+                        raise ValueError(
+                            f"[sampler] {episode}: closest rgb frame at {found_time:.1f}ms is {min_time_diff:.1f}ms away from query_time {query_time:.1f}ms (max allowed: {max_time_diff}ms)"
+                        )
             elif "wrench" in key:
                 query_id = np.searchsorted(
                     data_episode["obs"][f"wrench_time_stamps_{id}"], query_time

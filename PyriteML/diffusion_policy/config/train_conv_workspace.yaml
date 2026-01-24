@@ -1,7 +1,7 @@
 defaults:
   - _self_
   # - task: vase_wiping_conv.yaml
-  - task: flip_up_conv.yaml
+  - task: flipup_v3
 
 name: conv_230
 output_dir: ${oc.env:PYRITE_CHECKPOINT_FOLDERS}
@@ -150,7 +150,7 @@ training:
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 2000
-  num_epochs: 300
+  num_epochs: 1000
   
   log_gradient_norm: False
 
@@ -162,7 +162,7 @@ training:
   # training loop control
   # in epochs
   rollout_every: 10
-  checkpoint_every: 10
+  checkpoint_every: 100
   val_every: 5
   sample_every: 5
   # steps per epoch
@@ -175,7 +175,7 @@ training:
 logging:
   project: hierarchical-policy
   resume: False
-  mode: online
+  mode: disabled
   name: ${now:%Y.%m.%d-%H.%M.%S}_${task_name}_${name}
   tags: ["${name}", "${task_name}", "${exp_name}"]
   id: null

@@ -25,26 +25,50 @@ if "PYRITE_DATASET_FOLDERS" not in os.environ:
     raise ValueError("Please set the environment variable PYRITE_DATASET_FOLDERS")
 
 
+# def image_read(rgb_dir, rgb_file_list, i, output_data_rgb, output_data_rgb_time_stamps):
+#     img_name = rgb_file_list[i]
+#     img = cv2.imread(str(rgb_dir.joinpath(img_name)))
+#     # convert BGR to RGB for imageio
+#     output_data_rgb[i] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+#     time_img_ms = float(img_name[11:22])
+#     # img_000695_29345.186724_ms
+#     # 这里提取出了拍摄时间
+#     output_data_rgb_time_stamps[i] = time_img_ms
+#     return True
+
 def image_read(rgb_dir, rgb_file_list, i, output_data_rgb, output_data_rgb_time_stamps):
     img_name = rgb_file_list[i]
     img = cv2.imread(str(rgb_dir.joinpath(img_name)))
+
+    if img is None:
+        print(f"Error: Failed to read {img_name}")
+        return False
     # convert BGR to RGB for imageio
     output_data_rgb[i] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    time_img_ms = float(img_name[11:22])
-    # img_000695_29345.186724_ms
-    # 这里提取出了拍摄时间
-    output_data_rgb_time_stamps[i] = time_img_ms
+
+    # time_img_ms = float(img_name[11:22])
+    # output_data_rgb_time_stamps[i] = time_img_ms
+
+    try:
+        # time_img_ms = float(img_name.split('.')[0])
+        time_img_ms = int(img_name.split('.')[0])
+        output_data_rgb_time_stamps[i] = float(time_img_ms)
+    except ValueError:
+        print(f"Error: Could not parse timestamp from {img_name}")
+        return False
+
     return True
 
 
 # specify the input and output directories
-id_list = [0]  # single robot
+robot_id_list = [0]  # single robot
+camera_id_list = [0,1] # inhand and global
 # id_list = [0, 1] # bimanual
 
 input_dir = pathlib.Path(
-    os.environ.get("PYRITE_RAW_DATASET_FOLDERS") + "/flip_up_new_v5"
+    os.environ.get("PYRITE_RAW_DATASET_FOLDERS") + "/flip_v3"
 )
-output_dir = pathlib.Path(os.environ.get("PYRITE_DATASET_FOLDERS") + "/flip_up_new_v5")
+output_dir = pathlib.Path(os.environ.get("PYRITE_DATASET_FOLDERS") + "/flipup_v3")
 
 robot_timestamp_dir = output_dir.joinpath("robot_timestamp")
 wrench_timestamp_dir = output_dir.joinpath("wrench_timestamp")
@@ -104,21 +128,40 @@ print("Reading data from input_dir: ", input_dir)
 episode_names = os.listdir(input_dir)
 
 
-def process_one_episode(root, episode_name, input_dir, id_list):
+def process_one_episode(root, episode_name, input_dir, robot_id_list, camera_id_list):
     if episode_name.startswith("."):
         return True
 
     # info about input
-    episode_id = episode_name[8:]
-    print(f"episode_name: {episode_name}, episode_id: {episode_id}")
+    # episode_id = episode_name[8:]
+    # print(f"episode_name: {episode_name}, episode_id: {episode_id}")
+    # episode_dir = input_dir.joinpath(episode_name)
+
+    # acp的格式
+    # episode_1727294514
+    # 这个考虑修改上面那个路径读取逻辑
+    # scene_0001
+
+    # 🔥 修正：scene_0001 → episode_id = 1
+    episode_id = int(episode_name.split('_')[-1])
+    print(f"scene_name: {episode_name}, scene_id: {episode_id}")
     episode_dir = input_dir.joinpath(episode_name)
 
     # read rgb
     data_rgb = []
     data_rgb_time_stamps = []
     rgb_data_shapes = []
-    for id in id_list:
-        rgb_dir = episode_dir.joinpath("rgb_" + str(id))
+    for id in camera_id_list:
+
+        if id == 0:
+            cam_name = "cam_104122060902"
+        elif id == 1:
+            cam_name = "cam_104122064489"
+        else:  
+            print("id error")
+            break
+
+        rgb_dir = episode_dir.joinpath(cam_name).joinpath("color")
         rgb_file_list = os.listdir(rgb_dir)
         rgb_file_list.sort()  # important!
         num_raw_images = len(rgb_file_list)
@@ -154,7 +197,7 @@ def process_one_episode(root, episode_name, input_dir, id_list):
     data_wrench = []
     data_wrench_time_stamps = []
     print(f"Reading low dim data for : {episode_dir}")
-    for id in id_list:
+    for id in robot_id_list:
         json_path = episode_dir.joinpath("robot_data_" + str(id) + ".json")
         df_robot_data = pd.read_json(json_path)
         data_robot_time_stamps.append(df_robot_data["robot_time_stamps"].to_numpy())
@@ -168,40 +211,50 @@ def process_one_episode(root, episode_name, input_dir, id_list):
 
     # get filtered force
     print(f"Computing filtered wrench for {episode_name}")
+
+    # 下面这个para其实没被用到
+
     force_filtering_para = {
         "sampling_freq": 100,
         "cutoff_freq": 5,
         "order": 5,
     }
+
     ft_filter = LiveLPFilter(
-        fs=500,      # 采样频率 (Sampling Frequency) 为 500Hz
+        fs=1000,      # 我们的lowdim有1000hz
         cutoff=5,    # 截止频率 (Cutoff Frequency) 为 5Hz
         order=5,     # 滤波器阶数 (Order)
         dim=6,       # 维度 (Dimension) 为 6
     )
     data_wrench_filtered = []
-    for id in id_list:
+    for id in robot_id_list:
         data_wrench_filtered.append(np.array([ft_filter(y) for y in data_wrench[id]]))
 
     # make time stamps start from zero
     # 这一部分让大数变小，同时让时间都从以0为参考值
     # 即使开始记录的时间不一样，至少有一个时间戳数组从0开始，其他的应该也接近0
     time_offsets = []
-    for id in id_list:
-        time_offsets.append(data_rgb_time_stamps[id][0])
-        time_offsets.append(data_robot_time_stamps[id][0])
-        time_offsets.append(data_wrench_time_stamps[id][0])
+
+    for cam_id in camera_id_list:
+        time_offsets.append(data_rgb_time_stamps[cam_id][0])
+    for robot_id in robot_id_list:
+        time_offsets.append(data_robot_time_stamps[robot_id][0])
+        time_offsets.append(data_wrench_time_stamps[robot_id][0])
+
     time_offset = np.min(time_offsets)
-    for id in id_list:
-        data_rgb_time_stamps[id] -= time_offset
-        data_robot_time_stamps[id] -= time_offset
-        data_wrench_time_stamps[id] -= time_offset
+
+    # 🔥 修复：转换为 float 后再减
+    for cam_id in camera_id_list:
+        data_rgb_time_stamps[cam_id] = data_rgb_time_stamps[cam_id].astype(float) - time_offset
+    for robot_id in robot_id_list:
+        data_robot_time_stamps[robot_id] = data_robot_time_stamps[robot_id].astype(float) - time_offset
+        data_wrench_time_stamps[robot_id] = data_wrench_time_stamps[robot_id].astype(float) - time_offset
 
     # create output zarr
     print(f"Saving everything to : {output_dir}")
     recoder_buffer = EpisodeDataBuffer(
         store_path=output_dir,
-        camera_ids=id_list,
+        camera_ids=camera_id_list,
         save_video=True,
         save_video_fps=60,
         data=root,
@@ -209,10 +262,10 @@ def process_one_episode(root, episode_name, input_dir, id_list):
 
     # save data using recoder_buffer
     rgb_data_buffer = {}
-    for id in id_list:
-        rgb_data = data_rgb[id]
-        rgb_data_buffer.update({id: VideoData(rgb=rgb_data, camera_id=id)})
-    recoder_buffer.create_zarr_groups_for_episode(rgb_data_shapes, id_list, episode_id)
+    for cam_id in camera_id_list:
+        rgb_data_buffer[cam_id] = VideoData(rgb=data_rgb[cam_id], camera_id=cam_id)
+    
+    recoder_buffer.create_zarr_groups_for_episode(rgb_data_shapes, camera_id_list, episode_id)
     recoder_buffer.save_video_for_episode(
         visual_observations=rgb_data_buffer,
         visual_time_stamps=data_rgb_time_stamps,
@@ -237,7 +290,8 @@ with concurrent.futures.ProcessPoolExecutor(max_workers=3) as executor:
             root,
             episode_name,
             input_dir,
-            id_list,
+            robot_id_list,
+            camera_id_list,
         )
         for episode_name in episode_names
     ]
@@ -255,29 +309,39 @@ episode_robot_len = []
 episode_wrench_len = []
 episode_rgb_len = []
 
-for id in id_list:
+for id in robot_id_list:
     episode_robot_len.append([])
     episode_wrench_len.append([])
+
+for cam_id in camera_id_list: 
     episode_rgb_len.append([])
 
+# 统计时
 count = 0
 for key in buffer["data"].keys():
     episode = key
     ep_data = buffer["data"][episode]
 
-    for id in id_list:
-        episode_robot_len[id].append(ep_data[f"ts_pose_fb_{id}"].shape[0])
-        episode_wrench_len[id].append(ep_data[f"wrench_{id}"].shape[0])
-        episode_rgb_len[id].append(ep_data[f"rgb_{id}"].shape[0])
-        print(
-            f"Number {count}: {episode}: id = {id}: robot len: {episode_robot_len[id][-1]}, wrench_len: {episode_wrench_len[id][-1]} rgb len: {episode_rgb_len[id][-1]}"
-        )
+    for robot_id in robot_id_list:
+        episode_robot_len[robot_id].append(ep_data[f"ts_pose_fb_{robot_id}"].shape[0])
+        episode_wrench_len[robot_id].append(ep_data[f"wrench_{robot_id}"].shape[0])
+    
+    for cam_id in camera_id_list:  # ← 改这里
+        episode_rgb_len[cam_id].append(ep_data[f"rgb_{cam_id}"].shape[0])
+        
+    print(f"Episode {count}: {episode}")
+    for robot_id in robot_id_list:
+        print(f"  Robot {robot_id}: len={episode_robot_len[robot_id][-1]}")
+    for cam_id in camera_id_list:
+        print(f"  Camera {cam_id}: len={episode_rgb_len[cam_id][-1]}")
     count += 1
 
-for id in id_list:
+for id in robot_id_list:
     meta[f"episode_robot{id}_len"] = zarr.array(episode_robot_len[id])
     meta[f"episode_wrench{id}_len"] = zarr.array(episode_wrench_len[id])
-    meta[f"episode_rgb{id}_len"] = zarr.array(episode_rgb_len[id])
+
+for cam_id in camera_id_list:  # ← 改这里
+    meta[f"episode_rgb{cam_id}_len"] = zarr.array(episode_rgb_len[cam_id])
 
 print(f"All done! Generated {count} episodes in {output_dir}")
 print("The only thing left is to run postprocess_add_virtual_target_label.py")

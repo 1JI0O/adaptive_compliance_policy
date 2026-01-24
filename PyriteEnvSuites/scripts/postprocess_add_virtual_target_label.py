@@ -26,14 +26,14 @@ if "PYRITE_DATASET_FOLDERS" not in os.environ:
 dataset_folder_path = os.environ.get("PYRITE_DATASET_FOLDERS")
 
 # Config for flip up (single robot)
-dataset_path = dataset_folder_path + "/flip_up_new_v5/"
+dataset_path = dataset_folder_path + "/flipup_v3/"
 id_list = [0]
 
 # # Config for vase wiping (bimanual)
 # dataset_path = dataset_folder_path + "/vase_wiping_v6.3/"
 # id_list = [0, 1]
 
-wrench_moving_average_window_size = 7000  # should be around 1s of data
+wrench_moving_average_window_size = 1000  # should be around 1s of data
 buffer = zarr.open(dataset_path, mode="r+")
 
 num_of_process = 5
@@ -42,7 +42,7 @@ fin_every_n = 50
 
 stiffness_estimation_para = {
     # penetration estimator
-    "k_max": 5000,  # 1cm 50N
+    "k_max": 10000,  # 1cm 50N
     "k_min": 200,  # 1cm 2.5N
     "f_low": 0.5,
     "f_high": 5,
@@ -51,9 +51,9 @@ stiffness_estimation_para = {
     "vel_tol": 999.002,  # (not using) vel larger than this will trigger stiffness adjustment
 }
 
-flag_real = False
-if "real" in dataset_path:
-    flag_real = True
+flag_real = True
+# if "real" in dataset_path:
+#     flag_real = True
 
 # 这个判断real的逻辑可以删了
 
@@ -246,7 +246,7 @@ def process_episode(ep, ep_data, id_list):
 
             plt.draw()
             input("Press Enter to continue...")
-            return True
+        return True
 
 
 if num_of_process == 1:

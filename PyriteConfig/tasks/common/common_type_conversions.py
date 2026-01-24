@@ -60,16 +60,16 @@ def raw_to_obs(
             episode_data["obs"][f"robot{id}_abs_eef_pos"] = pose9_fb[..., :3]
             episode_data["obs"][f"robot{id}_abs_eef_rot_axis_angle"] = pose9_fb[..., 3:]
 
-        # timestamps
-        episode_data["obs"][f"rgb_time_stamps_{id}"] = raw_data[
-            f"rgb_time_stamps_{id}"
-        ][:]
-        episode_data["obs"][f"robot_time_stamps_{id}"] = raw_data[
-            f"robot_time_stamps_{id}"
-        ][:]
-        episode_data["obs"][f"wrench_time_stamps_{id}"] = raw_data[
-            f"wrench_time_stamps_{id}"
-        ][:]
+    # 🔥 修改：根据 shape_meta["obs"] 中定义的 timestamp 来转换
+    # 这样可以支持多个相机的时间戳（rgb_time_stamps_0, rgb_time_stamps_1等）
+    for key, attr in shape_meta["obs"].items():
+        type = attr.get("type", "low_dim")
+        if type == "timestamp":
+            # 确保这个 key 在 raw_data 中存在
+            if key in raw_data:
+                episode_data["obs"][key] = raw_data[key][:]
+            else:
+                raise KeyError(f"Timestamp key '{key}' defined in shape_meta['obs'] but not found in raw_data. Available keys: {list(raw_data.keys())}")
 
 
 def raw_to_action9(
