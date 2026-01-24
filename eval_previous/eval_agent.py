@@ -20,10 +20,10 @@ if __name__ == "__main__":
 
 import time
 import numpy as np
-from device.flexiv_arm import FlexivArm
-from device.camera import RealSenseRGBDCamera
-from utils.transformation import xyz_rot_transform
-from device.flexiv_gripper import FlexivGripper
+from eval.device.flexiv_arm import FlexivArm
+from eval.device.camera import RealSenseRGBDCamera
+from eval.utils.transformation import xyz_rot_transform
+from eval.device.flexiv_gripper import FlexivGripper
 
 
 class SingleArmAgent:
@@ -46,8 +46,7 @@ class SingleArmAgent:
     ):
         # initialize
         self.robot = FlexivArm(robot_serial)
-        # self.gripper = FlexivGripper(gripper_port)
-        self.gripper = FlexivGripper(self.robot)
+        self.gripper = FlexivGripper(gripper_port)
         self.camera_serial = camera_serial
         self.camera = RealSenseRGBDCamera(serial = camera_serial)
         self.intrinsics = self.camera.get_intrinsic()
@@ -58,23 +57,20 @@ class SingleArmAgent:
         
         self.last_gripper = 0
 
-        # from force policy : flip.py
-        from flexiv_robot_interface import flexiv_rizon_interface as single
-        self.gripper.gripper.Move(0.0, 0.1, 50)
-        # time.sleep(2.0)
-        single.zero_ft_sensor(self.robot.robot)  
-        # tar_pose_q_deg = [58.1448266793442, -65.67344367453917, -114.20232705737313, 134.4739665177507, 97.2945216129125, 29.70754921561624, -28.921589102391565]
-        tar_pose_q_deg = [46.51, -60.72, -111.44, 129.64, 97.36, 24.09, 69.10] #flip ready pose
-        # tar_pose_q_deg = [6.653602314234015, -91.55274357663085, -108.26513730890072, 104.56521700462103, 52.48519191313113, 5.213589262381651, 84.43173178061124]
-        single.move_j_deg(self.robot.robot, tar_pose_q_deg,time_out=10, joint_allow_error_angle=3, stiffness_ratio=0.1, compliant=False, is_blocking=True)
-        single.zero_ft_sensor(self.robot.robot)
-        time.sleep(3.0)
-        single.switch_mode(self.robot.robot, "NRT_SUPER_PRIMITIVE") 
-        # single.switch_mode(self.config.robots["right"].robot, "NRT_CARTESIAN_MOTION_FORCE")
+        # move to ready pose
+        self.robot.send_tcp_pose(
+            self.ready_pose,
+            max_vel = self.max_vel,
+            max_acc = self.max_acc,
+            max_angular_vel = self.max_angular_vel,
+            max_angular_acc = self.max_angular_acc
+        )
+        self.gripper.close_gripper()
+        time.sleep(5)
+        self.robot.cali_sensor()
 
-        self.robot.robot.SetForceControlAxis([0, 0, 0, 0, 0, 0])
-        self.robot.robot.SetCartesianImpedance([5000, 5000, 5000, 300, 300, 300], [0.7, 0.7, 0.7, 0.7, 0.7, 0.7])
-        self.robot.robot.SetMaxContactWrench([50, 50, 50, 30, 30, 30])
+        # set max contact wrench
+        self.robot.robot.SetMaxContactWrench(max_contact_wrench)
     
     @property
     def ready_pose(self):
@@ -100,28 +96,25 @@ class SingleArmAgent:
         gripper_width = self.gripper.get_states()["width"]
 
         # 返回的是这个
-        proprio = np.concatenate([tcp_pose, gripper_width], axis = 0)
+        proprio = np.concatenate([tcp_pose, [gripper_width]], axis = 0)
     
         if with_joint:
-            proprio_joint = np.concatenate([joint_pos, gripper_width], axis = 0)
+            proprio_joint = np.concatenate([joint_pos, [gripper_width]], axis = 0)
             return proprio, proprio_joint
         else:
             return proprio
 
-    def get_wrench(self):
+    def get_wrench()
         wrench = self.robot.get_force_torque_tcp()
         return wrench
 
-    def action(self, action,force_frame,stiffness_vector, rotation_rep = "rotation_6d", rotation_rep_convention = None):
+    def action(self, action,stiffness_vector, rotation_rep = "rotation_6d", rotation_rep_convention = None):
         tcp_pose = xyz_rot_transform(
             action[: 9],
             from_rep = rotation_rep, 
             to_rep = "quaternion",
             from_convention = rotation_rep_convention
         )
-
-
-        self.robot.set_force_control_frame('world', force_frame)
 
         self.robot.set_cartesian_impedance(stiffness_vector)
 
