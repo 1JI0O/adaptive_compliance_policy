@@ -102,12 +102,12 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
             init_kwargs={"wandb": wandb_cfg},
         )
 
-        # resume training
-        if cfg.training.resume:
-            lastest_ckpt_path = self.get_checkpoint_path()
-            if lastest_ckpt_path.is_file():
-                accelerator.print(f"Resuming from checkpoint {lastest_ckpt_path}")
-                self.load_checkpoint(path=lastest_ckpt_path)
+        # # resume training
+        # if cfg.training.resume:
+        #     lastest_ckpt_path = self.get_checkpoint_path()
+        #     if lastest_ckpt_path.is_file():
+        #         accelerator.print(f"Resuming from checkpoint {lastest_ckpt_path}")
+        #         self.load_checkpoint(path=lastest_ckpt_path)
 
         # configure dataset
         dataset: BaseImageDataset
@@ -153,6 +153,27 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
         ema: EMAModel = None
         if cfg.training.use_ema:
             ema = hydra.utils.instantiate(cfg.ema, model=self.ema_model)
+
+        # 🔥 移到这里：在创建 lr_scheduler 和 ema 之后再 resume
+        if cfg.training.resume:
+            lastest_ckpt_path = self.get_checkpoint_path()
+            if lastest_ckpt_path.is_file():
+                accelerator.print(f"[RESUME] Loading checkpoint from {lastest_ckpt_path}")
+                
+                # 🔥 修改：先设置 initial_lr，避免 KeyError
+                for param_group in self.optimizer.param_groups:
+                    if 'initial_lr' not in param_group:
+                        param_group['initial_lr'] = param_group['lr']
+                
+                # 加载 checkpoint
+                self.load_checkpoint(path=lastest_ckpt_path)
+                
+                # 🔥 加载后需要重新设置 lr_scheduler 的 last_epoch
+                lr_scheduler.last_epoch = self.global_step - 1
+                
+                accelerator.print(f"[RESUME] Resumed from global_step {self.global_step}")
+            else:
+                accelerator.print(f"[RESUME] Checkpoint not found at {lastest_ckpt_path}, starting from scratch")
 
         # # configure env
         # env_runner: BaseImageRunner

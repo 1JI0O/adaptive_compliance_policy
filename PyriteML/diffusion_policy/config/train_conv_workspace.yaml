@@ -123,14 +123,14 @@ ema:
 
 dataloader:
   batch_size: 128
-  num_workers: 32
+  num_workers: 8
   shuffle: True
   pin_memory: True
   persistent_workers: True
 
 val_dataloader:
   batch_size: 128
-  num_workers: 32
+  num_workers: 4
   shuffle: False
   pin_memory: True
   persistent_workers: True
@@ -146,7 +146,7 @@ training:
   device: "cuda:0"
   seed: 42
   debug: False
-  resume: False
+  # resume: False
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 2000
@@ -170,6 +170,9 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
+  
+  resume: true
+  checkpoint_path: "/data/haoxiang/logs/acp_logs/2026.01.24_13.45.14_flipup_v3_conv_230/checkpoints/latest.ckpt"
 
 
 logging:

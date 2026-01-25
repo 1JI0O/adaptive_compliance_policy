@@ -8,6 +8,7 @@ from omegaconf import OmegaConf
 import dill
 import torch
 import threading
+from pathlib import Path
 
 
 class BaseWorkspace:
@@ -70,8 +71,40 @@ class BaseWorkspace:
             torch.save(payload, path.open('wb'), pickle_module=dill)
         return str(path.absolute())
     
-    def get_checkpoint_path(self, tag='latest'):
-        return pathlib.Path(self.output_dir).joinpath('checkpoints', f'{tag}.ckpt')
+    # def get_checkpoint_path(self, tag='latest'):
+    #     return pathlib.Path(self.output_dir).joinpath('checkpoints', f'{tag}.ckpt')
+    def get_checkpoint_path(self):
+        """Get the path to the checkpoint to resume from.
+        
+        Priority:
+        1. cfg.training.checkpoint_path (explicitly specified)
+        2. {output_dir}/checkpoints/latest.ckpt
+        3. Latest epoch checkpoint in {output_dir}/checkpoints/
+        """
+        # 🔥 优先使用配置文件中指定的路径
+        if hasattr(self.cfg.training, 'checkpoint_path') and self.cfg.training.checkpoint_path:
+            ckpt_path = Path(self.cfg.training.checkpoint_path)
+            if ckpt_path.is_file():
+                return ckpt_path
+            else:
+                print(f"[WARNING] Specified checkpoint not found: {ckpt_path}")
+        
+        # 使用默认路径
+        checkpoint_dir = Path(self.output_dir) / 'checkpoints'
+        
+        # 查找 latest.ckpt
+        latest_ckpt = checkpoint_dir / 'latest.ckpt'
+        if latest_ckpt.is_file():
+            return latest_ckpt
+        
+        # 查找最新的 epoch checkpoint
+        if checkpoint_dir.exists():
+            ckpt_files = sorted(checkpoint_dir.glob('epoch_*.ckpt'))
+            if ckpt_files:
+                return ckpt_files[-1]
+        
+        # 都没找到，返回默认路径（会触发 is_file() = False）
+        return latest_ckpt
 
     def load_payload(self, payload, exclude_keys=None, include_keys=None, **kwargs):
         if exclude_keys is None:
