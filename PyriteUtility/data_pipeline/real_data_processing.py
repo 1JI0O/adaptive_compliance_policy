@@ -66,9 +66,9 @@ camera_id_list = [0,1] # inhand and global
 # id_list = [0, 1] # bimanual
 
 input_dir = pathlib.Path(
-    os.environ.get("PYRITE_RAW_DATASET_FOLDERS") + "/flip_v3"
+    os.environ.get("PYRITE_RAW_DATASET_FOLDERS") + "/charger_v2/train"
 )
-output_dir = pathlib.Path(os.environ.get("PYRITE_DATASET_FOLDERS") + "/flipup_v3")
+output_dir = pathlib.Path(os.environ.get("PYRITE_DATASET_FOLDERS") + "/charger_v2_acp_processed")
 
 robot_timestamp_dir = output_dir.joinpath("robot_timestamp")
 wrench_timestamp_dir = output_dir.joinpath("wrench_timestamp")
@@ -154,9 +154,9 @@ def process_one_episode(root, episode_name, input_dir, robot_id_list, camera_id_
     for id in camera_id_list:
 
         if id == 0:
-            cam_name = "cam_104122060902"
+            cam_name = "cam_035622060973"
         elif id == 1:
-            cam_name = "cam_104122064489"
+            cam_name = "cam_104122062823"
         else:  
             print("id error")
             break

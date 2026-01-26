@@ -5,8 +5,8 @@ import numpy as np
 from pathlib import Path
 
 # --- 全局配置 ---
-ROOT_DIR = Path("/data/haoxiang/acp/flip_v3")
-H5_REL_PATH = "lowdim/lowdim_filled.h5"
+ROOT_DIR = Path("/data/haoxiang/data/charger_v2/train")
+H5_REL_PATH = "lowdim/lowdim.h5"
 OUTPUT_FILENAME = "wrench_data_0.json"
 
 def process_one_scene(scene_path):
@@ -24,7 +24,7 @@ def process_one_scene(scene_path):
     # 2. 读取 H5 文件所有数据
     with h5py.File(h5_path, 'r') as f:
         h5_ts = f['timestamp'][:]                # 时间戳
-        h5_wrench = f['force_torque_062046'][:]  # 力/力矩 (N, 6)
+        h5_wrench = f['force_torque_063047'][:]  # 力/力矩 (N, 6)
         
     # 3. 组装数据（完整1000Hz数据）
     result_data = {

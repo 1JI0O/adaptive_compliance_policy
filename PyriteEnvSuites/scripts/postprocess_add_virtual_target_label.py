@@ -26,7 +26,7 @@ if "PYRITE_DATASET_FOLDERS" not in os.environ:
 dataset_folder_path = os.environ.get("PYRITE_DATASET_FOLDERS")
 
 # Config for flip up (single robot)
-dataset_path = dataset_folder_path + "/flipup_v3/"
+dataset_path = dataset_folder_path + "/charger_v2_acp_processed"
 id_list = [0]
 
 # # Config for vase wiping (bimanual)
@@ -70,9 +70,9 @@ def process_episode(ep, ep_data, id_list):
         wrench_moving_average = np.zeros_like(wrench)
 
         # remove wrench measurement offset
-        Noffset = 200 # 取前200个样本求平均，作为抵消偏置
+        Noffset = 100 # 取前100个样本求平均，作为抵消偏置
         wrench_offset = np.mean(wrench[:Noffset], axis=0)
-        # 这里可能需要前200个样本不能动，不能受力
+        # 这里可能需要前100个样本不能动，不能受力
         print("wrench offset: ", wrench_offset)
         
         # wrench_offset 只出现在这里，说明这段代码没用
