@@ -37,6 +37,7 @@ class SingleArmAgent:
         robot_serial,
         gripper_port,
         camera_serial,
+        inhand_camera_serial,
         max_contact_wrench = [30, 30, 30, 10, 10, 10],
         max_vel = 0.5,
         max_acc = 2.0,
@@ -48,8 +49,10 @@ class SingleArmAgent:
         self.robot = FlexivArm(robot_serial)
         # self.gripper = FlexivGripper(gripper_port)
         self.gripper = FlexivGripper(self.robot)
-        self.camera_serial = camera_serial
-        self.camera = RealSenseRGBDCamera(serial = camera_serial)
+        self.camera_0_serial = camera_serial
+        self.camera_1_serial = inhand_camera_serial
+        self.camera_global = RealSenseRGBDCamera(serial = camera_serial)
+        self.camera_inhand = RealSenseRGBDCamera(serial = inhand_camera_serial)
         self.intrinsics = self.camera.get_intrinsic()
         self.max_vel = max_vel
         self.max_acc = max_acc
@@ -82,8 +85,9 @@ class SingleArmAgent:
 
     # 获取相机观察到的
     def get_global_observation(self):
-        _, colors, depths = self.camera.get_rgbd_images()
-        return colors, depths
+        colors_global, depths_global = self.camera_global.get_rgbd_images()
+        colors_inhand, depths_inhand = self.camera_inhand.get_rgbd_images()
+        return colors_global, colors_inhand
     
     # 获取机器人当前状态（本体感知），tcp 和夹爪宽度
     # 机械臂相关东西在 /device/arm.py
