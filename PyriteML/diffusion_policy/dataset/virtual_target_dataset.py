@@ -62,6 +62,15 @@ class VirtualTargetDataset(BaseDataset):
     ):
         # load into memory store
         print("[VirtualTargetDataset] loading data into store")
+
+        print("\n" + "="*50)
+        print(f"DEBUG - 原生 dataset_path: {dataset_path}")
+        print(f"DEBUG - 绝对路径: {os.path.abspath(dataset_path)}")
+        print(f"DEBUG - 路径是否存在: {os.path.exists(dataset_path)}")
+        if os.path.exists(dataset_path):
+            print(f"DEBUG - 目录下内容: {os.listdir(dataset_path)}")
+        print("="*50 + "\n")
+        
         with zarr.DirectoryStore(dataset_path) as directory_store:
             replay_buffer_raw = ReplayBuffer.copy_from_store(
                 src_store=directory_store, dest_store=zarr.MemoryStore()

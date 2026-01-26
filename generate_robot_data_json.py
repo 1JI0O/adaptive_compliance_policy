@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 
 # --- 全局配置 ---
-ROOT_DIR = Path("/data/haoxiang/acp/flip_v3")
+ROOT_DIR = Path("/data/haoxiang/data/shovel/train")
 H5_REL_PATH = "lowdim/lowdim_filled.h5"
 OUTPUT_FILENAME = "robot_data_0.json"  # 改成和原版一致的名字
 
