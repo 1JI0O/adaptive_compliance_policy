@@ -12,7 +12,6 @@ import numpy as np
 from collections import deque
 from datetime import datetime
 import zarr
-import cv2
 
 import yaml
 from easydict import EasyDict as edict
@@ -34,17 +33,17 @@ from scipy.spatial.transform import Rotation as R
 
 from PyriteUtility.computer_vision.imagecodecs_numcodecs import register_codecs
 
-device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ========================================
 # 配置路径
 # ========================================
-yaml_path = "/data/haoxiang/logs/acp_logs/2026.01.25_02.48.48_flipup_v3_conv_230/.hydra/config.yaml"
-ckpt_path = "/data/haoxiang/logs/acp_logs/2026.01.25_02.48.48_flipup_v3_conv_230/checkpoints/latest.ckpt"
-normalizer_path = "/data/haoxiang/logs/acp_logs/2026.01.25_02.48.48_flipup_v3_conv_230/sparse_normalizer.pkl"
+yaml_path = "/data/haoxiang/logs/acp_logs/2026.01.20_04.50.05_flip_new_v3_conv_230/.hydra/config.yaml"
+ckpt_path = "/data/haoxiang/logs/acp_logs/2026.01.20_04.50.05_flip_new_v3_conv_230/checkpoints/latest.ckpt"
+normalizer_path = "/data/haoxiang/logs/acp_logs/2026.01.20_04.50.05_flip_new_v3_conv_230/sparse_normalizer.pkl"
 
 # 数据集路径
-dataset_path = "/data/haoxiang/acp/acp_processed/flipup_v3"  
+dataset_path = "/data/haoxiang/acp/acp_processed/flip_new_v3"  
 episode_id = "episode_1" 
 
 # 超参数
@@ -53,10 +52,9 @@ sparse_obs_rgb_down_sample_steps = 1
 sparse_obs_rgb_horizon = 2
 sparse_obs_low_dim_down_sample_steps = 1
 sparse_obs_low_dim_horizon = 3
-sparse_obs_wrench_down_sample_steps = 5
+sparse_obs_wrench_down_sample_steps = 1
 sparse_obs_wrench_horizon = 32
 sparse_action_horizon = 16
-sparse_action_down_sample_steps = 1
 
 # ========================================
 # 数据加载器
@@ -79,14 +77,12 @@ class DatasetReplayer:
         
         # 读取所有数据到内存
         self.rgb_0 = ep_data['rgb_0'][:]                    # (T, H, W, 3)
-        self.rgb_1 = ep_data['rgb_1'][:]                    # (T, H, W, 3)
         self.ts_pose_fb_0 = ep_data['ts_pose_fb_0'][:]      # (T, 7) [x,y,z,qw,qx,qy,qz]
         self.wrench_0 = ep_data['wrench_0'][:]              # (T, 6)
         self.wrench_filtered = ep_data['wrench_filtered'][:] if 'wrench_filtered' in ep_data else self.wrench_0
         
         # 时间戳
         self.rgb_time_stamps_0 = ep_data['rgb_time_stamps_0'][:]
-        self.rgb_time_stamps_1 = ep_data['rgb_time_stamps_1'][:]
         self.robot_time_stamps_0 = ep_data['robot_time_stamps_0'][:]
         self.wrench_time_stamps_0 = ep_data['wrench_time_stamps_0'][:]
         
@@ -100,8 +96,7 @@ class DatasetReplayer:
         
         self.total_steps = len(self.robot_time_stamps_0)
         print(f"Loaded {self.total_steps} timesteps")
-        print(f"  RGB_0 shape: {self.rgb_0.shape}")
-        print(f"  RGB_1 shape: {self.rgb_1.shape}")
+        print(f"  RGB shape: {self.rgb_0.shape}")
         print(f"  Pose shape: {self.ts_pose_fb_0.shape}")
         print(f"  Wrench shape: {self.wrench_filtered.shape}")
         
@@ -110,15 +105,13 @@ class DatasetReplayer:
         获取第 t 步的观测数据
         
         Returns:
-            rgb_0: (H, W, 3) uint8
-            rgb_1: (H, W, 3) uint8
+            rgb: (H, W, 3) uint8
             pos: (3,) float
             rot6d: (6,) float
             wrench: (6,) float
         """
         # 1. RGB 图像
-        rgb_0 = self.rgb_0[t]  # (H, W, 3)
-        rgb_1 = self.rgb_1[t]  # (H, W, 3)
+        rgb = self.rgb_0[t]  # (H, W, 3)
         
         # 2. 位置和旋转
         pose7 = self.ts_pose_fb_0[t]  # [x, y, z, qw, qx, qy, qz]
@@ -134,7 +127,7 @@ class DatasetReplayer:
         # 3. 力/力矩
         wrench = self.wrench_filtered[t]
         
-        return rgb_0,rgb_1, pos, rot6d, wrench
+        return rgb, pos, rot6d, wrench
     
     def get_ground_truth_action(self, t):
         """
@@ -154,16 +147,14 @@ class DatasetReplayer:
 # ========================================
 # Buffer 管理
 # ========================================
-buffer_rgb_0 = deque(maxlen=sparse_obs_rgb_horizon)
-buffer_rgb_1 = deque(maxlen=sparse_obs_rgb_horizon)
+buffer_rgb = deque(maxlen=sparse_obs_rgb_horizon)
 buffer_pos = deque(maxlen=sparse_obs_low_dim_horizon)
 buffer_rot = deque(maxlen=sparse_obs_low_dim_horizon)
 buffer_wrench = deque(maxlen=sparse_obs_wrench_horizon)
-action_queue = deque(maxlen=8)
+action_queue = deque(maxlen=100)
 
 def reset_buffers():
-    buffer_rgb_0.clear()
-    buffer_rgb_1.clear()
+    buffer_rgb.clear()
     buffer_pos.clear()
     buffer_rot.clear()
     buffer_wrench.clear()
@@ -212,34 +203,27 @@ def evaluate_with_dataset():
     print("=" * 60)
     
     with torch.inference_mode():
-        for t in range(min(replayer.total_steps, 16)):  # 限制测试步数
+        for t in range(min(replayer.total_steps, 100)):  # 限制测试步数
             print(f"\nStep {t}/{replayer.total_steps} ---------------------")
             
             # ========================================
             # 1. 从数据集获取观测
             # ========================================
-            rgb_0_raw,rgb_1_raw ,end_pos, end_rot6d, wrench = replayer.get_obs_at_step(t)
+            rgb_raw, end_pos, end_rot6d, wrench = replayer.get_obs_at_step(t)
             
             # 处理 RGB 图像
             # 假设数据集中已经是 224x224，如果不是需要 resize
-            if rgb_0_raw.shape[:2] != (224, 224):
+            if rgb_raw.shape[:2] != (224, 224):
                 import cv2
-                rgb_0_raw = cv2.resize(rgb_0_raw, (224, 224), interpolation=cv2.INTER_AREA)
+                rgb_raw = cv2.resize(rgb_raw, (224, 224), interpolation=cv2.INTER_AREA)
             
-            rgb_0 = rgb_0_raw.transpose(2, 0, 1)  # HWC -> CHW
-
-            if rgb_1_raw.shape[:2] != (224, 224):
-                import cv2
-                rgb_1_raw = cv2.resize(rgb_1_raw, (224, 224), interpolation=cv2.INTER_AREA)
-            
-            rgb_1 = rgb_1_raw.transpose(2, 0, 1)  # HWC -> CHW
+            rgb = rgb_raw.transpose(2, 0, 1)  # HWC -> CHW
             
             # ========================================
             # 2. 添加到 buffer
             # ========================================
             if t % sparse_obs_rgb_down_sample_steps == 0:
-                buffer_rgb_0.append(rgb_0)
-                buffer_rgb_1.append(rgb_1)
+                buffer_rgb.append(rgb)
             if t % sparse_obs_low_dim_down_sample_steps == 0:
                 buffer_pos.append(end_pos)
                 buffer_rot.append(end_rot6d)
@@ -248,10 +232,8 @@ def evaluate_with_dataset():
             
             # 第一帧填充
             if t == 0:
-                while len(buffer_rgb_0) < sparse_obs_rgb_horizon:
-                    buffer_rgb_0.append(rgb_0)
-                while len(buffer_rgb_1) < sparse_obs_rgb_horizon:
-                    buffer_rgb_1.append(rgb_1)
+                while len(buffer_rgb) < sparse_obs_rgb_horizon:
+                    buffer_rgb.append(rgb)
                 while len(buffer_pos) < sparse_obs_low_dim_horizon:
                     buffer_pos.append(end_pos)
                 while len(buffer_rot) < sparse_obs_low_dim_horizon:
@@ -299,26 +281,12 @@ def evaluate_with_dataset():
                 # ✅ 使用相对化后的观测构建 batch
                 obs_batch = {
                     "sparse": {
-                        "rgb_0": torch.from_numpy(np.stack(list(buffer_rgb_0))).unsqueeze(0).float().to(device),
-                        "rgb_1": torch.from_numpy(np.stack(list(buffer_rgb_1))).unsqueeze(0).float().to(device),
+                        "rgb_0": torch.from_numpy(np.stack(list(buffer_rgb))).unsqueeze(0).float().to(device),
                         "robot0_eef_pos": torch.from_numpy(np.stack(buffer_pos_relative)).unsqueeze(0).float().to(device),  # ← 相对化
                         "robot0_eef_rot_axis_angle": torch.from_numpy(np.stack(buffer_rot_relative)).unsqueeze(0).float().to(device),  # ← 相对化
                         "robot0_eef_wrench": torch.from_numpy(np.stack(list(buffer_wrench))).unsqueeze(0).float().to(device)
                     }
                 }
-
-                # batch_dir = "/data/haoxiang/acp_test"
-                # batch_file = "batch_0.npy"
-                # batch_path = os.path.join(batch_dir, batch_file)
-                # numpy_batch = np.load(batch_path, allow_pickle=True).item()
-
-                # obs_batch = {
-                #     "sparse": {
-                #         key: torch.from_numpy(val).float().to(device) 
-                #         for key, val in numpy_batch.items()
-                #     }
-                # }
-
                 
                 result = policy.predict_action(obs_batch)
                 all_pred_actions = result['sparse'].squeeze(0).cpu().numpy()
@@ -367,7 +335,6 @@ def evaluate_with_dataset():
                 continue
             
             predicted_action = action_queue.popleft()
-            print(f"{t} pred action: \n {predicted_action}")
             
             # ========================================
             # 5. 获取 ground truth（如果有）
