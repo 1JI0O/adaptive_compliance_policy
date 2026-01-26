@@ -20,10 +20,10 @@ if __name__ == "__main__":
 
 import time
 import numpy as np
-from device.flexiv_arm import FlexivArm
-from device.camera import RealSenseRGBDCamera
+from easyrobot.arm.flexiv import FlexivArm
+from easyrobot.camera.realsense import RealSenseRGBDCamera
 from utils.transformation import xyz_rot_transform
-from device.flexiv_gripper import FlexivGripper
+from easyrobot.gripper.flexiv import FlexivGripper
 
 
 class SingleArmAgent:
@@ -37,6 +37,7 @@ class SingleArmAgent:
         robot_serial,
         gripper_port,
         camera_serial,
+        inhand_camera_serial,
         max_contact_wrench = [30, 30, 30, 10, 10, 10],
         max_vel = 0.5,
         max_acc = 2.0,
@@ -48,9 +49,11 @@ class SingleArmAgent:
         self.robot = FlexivArm(robot_serial)
         # self.gripper = FlexivGripper(gripper_port)
         self.gripper = FlexivGripper(self.robot)
-        self.camera_serial = camera_serial
-        self.camera = RealSenseRGBDCamera(serial = camera_serial)
-        self.intrinsics = self.camera.get_intrinsic()
+        self.camera_0_serial = camera_serial
+        self.camera_1_serial = inhand_camera_serial
+        self.camera_global = RealSenseRGBDCamera(serial = camera_serial)
+        self.camera_inhand = RealSenseRGBDCamera(serial = inhand_camera_serial)
+        # self.intrinsics = self.camera.get_intrinsic()
         self.max_vel = max_vel
         self.max_acc = max_acc
         self.max_angular_vel = max_angular_vel
@@ -73,8 +76,8 @@ class SingleArmAgent:
         # single.switch_mode(self.config.robots["right"].robot, "NRT_CARTESIAN_MOTION_FORCE")
 
         self.robot.robot.SetForceControlAxis([0, 0, 0, 0, 0, 0])
-        self.robot.robot.SetCartesianImpedance([5000, 5000, 5000, 300, 300, 300], [0.7, 0.7, 0.7, 0.7, 0.7, 0.7])
-        self.robot.robot.SetMaxContactWrench([50, 50, 50, 30, 30, 30])
+        self.robot.robot.SetCartesianImpedance([10000, 10000, 10000, 500, 500, 500], [0.7, 0.7, 0.7, 0.7, 0.7, 0.7])
+        self.robot.robot.SetMaxContactWrench([50, 50, 50, 3, 3, 3])
     
     @property
     def ready_pose(self):
@@ -82,8 +85,9 @@ class SingleArmAgent:
 
     # 获取相机观察到的
     def get_global_observation(self):
-        _, colors, depths = self.camera.get_rgbd_images()
-        return colors, depths
+        colors_global, depths_global = self.camera_global.get_rgbd_images()
+        colors_inhand, depths_inhand = self.camera_inhand.get_rgbd_images()
+        return colors_global, colors_inhand
     
     # 获取机器人当前状态（本体感知），tcp 和夹爪宽度
     # 机械臂相关东西在 /device/arm.py
@@ -119,7 +123,12 @@ class SingleArmAgent:
             to_rep = "quaternion",
             from_convention = rotation_rep_convention
         )
-
+        
+        force_frame = xyz_rot_transform(
+            force_frame,
+            from_rep = "matrix", 
+            to_rep = "quaternion"
+        )
 
         self.robot.set_force_control_frame('world', force_frame)
 

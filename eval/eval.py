@@ -59,28 +59,43 @@ from scipy.spatial.transform import Rotation as R
 
 from eval_agent import SingleArmAgent
 
-# 图像观测：看最近 2 帧，步长为 1 (间隔约 50ms)
+# # 图像观测：看最近 2 帧，步长为 1 (间隔约 50ms)
+# sparse_obs_rgb_down_sample_steps = 1
+# sparse_obs_rgb_horizon = 2
+
+# # 低维状态（Pose）：看最近 3 帧
+# sparse_obs_low_dim_down_sample_steps = 1
+# sparse_obs_low_dim_horizon = 3
+
+# # 力矩（Wrench）：力矩通常需要更长的历史信息。
+# sparse_obs_wrench_down_sample_steps = 1
+# sparse_obs_wrench_horizon = 32
+# # 动作预测（Action）：预测未来 16 帧（约 0.8s 的动作轨迹）
+# sparse_action_down_sample_steps = 1
+# sparse_action_horizon = 16
+
+# RGB（15 Hz 相机）
 sparse_obs_rgb_down_sample_steps = 1
 sparse_obs_rgb_horizon = 2
 
-# 低维状态（Pose）：看最近 3 帧
+# Pose（1000 Hz，但只需要短期）
 sparse_obs_low_dim_down_sample_steps = 1
 sparse_obs_low_dim_horizon = 3
 
-# 力矩（Wrench）：力矩通常需要更长的历史信息。
-sparse_obs_wrench_down_sample_steps = 1
-sparse_obs_wrench_horizon = 32
-# 动作预测（Action）：预测未来 16 帧（约 0.8s 的动作轨迹）
+# Wrench（1000 Hz，需要长期历史 + 1D Conv 处理）
+sparse_obs_wrench_down_sample_steps = 5   # 🔥 关键：扩大时间感受野
+sparse_obs_wrench_horizon = 32            # 🔥 关键：足够的样本给 1D Conv
+# Action
 sparse_action_down_sample_steps = 1
 sparse_action_horizon = 16
 
 # 以上这些参数可以从yaml里面读取，先实现主干逻辑
 
-yaml_path = "/home/flexiv/data/acp/.hydra/config.yaml"
-ckpt_path = "/home/flexiv/data/acp/latest.ckpt"
+yaml_path = "/home/flexiv/data/acp_two_cam/.hydra/config.yaml"
+ckpt_path = "/home/flexiv/data/acp_two_cam/epoch_600.ckpt"
 max_steps = 3000
-eval_config_path = "/home/flexiv/git/adaptive_compliance_policy/eval/eval_config.yaml"
-normalizer_path = "/home/flexiv/data/acp/sparse_normalizer.pkl"
+eval_config_path = "/home/flexiv/git/acp_two_cam/eval/eval_config.yaml"
+normalizer_path = "/home/flexiv/data/acp_two_cam/sparse_normalizer.pkl"
 
 # color_path = "/data/haoxiang/acp/flip_v3/scene_0001/cam_104122060902/color/1768287143577.png"
 
@@ -95,17 +110,20 @@ n_action_steps = 8
 
 # === 初始化 Buffer ===
 # 使用 deque 来自动维护滑动窗口
-buffer_rgb = deque(maxlen=sparse_obs_rgb_horizon)
+buffer_rgb_0 = deque(maxlen=sparse_obs_rgb_horizon)  # 相机 0
+buffer_rgb_1 = deque(maxlen=sparse_obs_rgb_horizon)  # 相机 1
 buffer_pos = deque(maxlen=sparse_obs_low_dim_horizon)
 buffer_rot = deque(maxlen=sparse_obs_low_dim_horizon)
 buffer_wrench = deque(maxlen=sparse_obs_wrench_horizon)
 
 action_queue = deque(maxlen=100)
 
-# export PYRITE_CHECKPOINT_FOLDERS=/home/flexiv/data/acp
+# export PYRITE_CHECKPOINT_FOLDERS=/home/flexiv/data/acp_two_cam
+# export PYRITE_DATASET_FOLDERS=/home/flexiv/data/acp_two_cam
 
 def reset_buffers():
-    buffer_rgb.clear()
+    buffer_rgb_0.clear()
+    buffer_rgb_1.clear()  # 🔥 新增
     buffer_pos.clear()
     buffer_rot.clear()
     buffer_wrench.clear()
@@ -187,16 +205,18 @@ def evaluate():
             print(f"Step {t} ---------------------")
            
 
-            rgb_raw, _ = agent.get_global_observation() # (H_raw, W_raw, 3), uint8
+            rgb_raw_0, rgb_raw_1 = agent.get_global_observation() # (H_raw, W_raw, 3), uint8
+            # 这里需要修改agent实现
 
-            # rgb_raw = load_test_obs(color_path)
 
-            # 强制缩放到 224x224 
-            # cv2.resize 接受的是 (Width, Height)
-            rgb_resized = cv2.resize(rgb_raw, (224, 224), interpolation=cv2.INTER_AREA)
-
-            # HWC 转 CHW 
-            rgb = rgb_resized.transpose(2, 0, 1)        # (3, 224, 224)
+            # 🔥 分别处理两个相机的图像
+            # 相机 0
+            rgb_resized_0 = cv2.resize(rgb_raw_0, (224, 224), interpolation=cv2.INTER_AREA)
+            rgb_0 = rgb_resized_0.transpose(2, 0, 1)  # (3, 224, 224)
+            
+            # 相机 1
+            rgb_resized_1 = cv2.resize(rgb_raw_1, (224, 224), interpolation=cv2.INTER_AREA)
+            rgb_1 = rgb_resized_1.transpose(2, 0, 1)  # (3, 224, 224)
 
             proprio = agent.get_proprio() # [x, y, z, rot6d, gripper]
             # get_proprio 已经 xyz_rot_transform 到六元数了，不用再次转换
@@ -207,7 +227,9 @@ def evaluate():
             
             # 考虑steps
             if t % sparse_obs_rgb_down_sample_steps == 0:
-                buffer_rgb.append(rgb)
+                buffer_rgb_0.append(rgb_0)
+                buffer_rgb_1.append(rgb_1)
+
             if t % sparse_obs_low_dim_down_sample_steps == 0:
                 buffer_pos.append(end_pos)
                 buffer_rot.append(end_rot6d)
@@ -216,7 +238,8 @@ def evaluate():
 
             # Padding: 如果是第一帧，把 Buffer 填满，防止长度不够报错
             if t == 0:
-                while len(buffer_rgb) < sparse_obs_rgb_horizon: buffer_rgb.append(rgb)
+                while len(buffer_rgb_0) < sparse_obs_rgb_horizon: buffer_rgb_0.append(rgb_0)
+                while len(buffer_rgb_1) < sparse_obs_rgb_horizon: buffer_rgb_1.append(rgb_1)
                 while len(buffer_pos) < sparse_obs_low_dim_horizon: buffer_pos.append(end_pos)
                 while len(buffer_rot) < sparse_obs_low_dim_horizon: buffer_rot.append(end_rot6d)
                 while len(buffer_wrench) < sparse_obs_wrench_horizon: buffer_wrench.append(wrench)
@@ -250,21 +273,24 @@ def evaluate():
                 # 构建 batch（使用相对化的观测）
                 obs_batch = {
                     "sparse": {
-                        "rgb_0": torch.from_numpy(np.stack(list(buffer_rgb))).unsqueeze(0).float().to(device),
+                        "rgb_0": torch.from_numpy(np.stack(list(buffer_rgb_0))).unsqueeze(0).float().to(device),
+                        "rgb_1": torch.from_numpy(np.stack(list(buffer_rgb_1))).unsqueeze(0).float().to(device),
                         "robot0_eef_pos": torch.from_numpy(np.stack(buffer_pos_relative)).unsqueeze(0).float().to(device),
                         "robot0_eef_rot_axis_angle": torch.from_numpy(np.stack(buffer_rot_relative)).unsqueeze(0).float().to(device),
                         "robot0_eef_wrench": torch.from_numpy(np.stack(list(buffer_wrench))).unsqueeze(0).float().to(device)
                     }
                 }
 
-                result,stiffness_unnorm,raw_pred = policy.predict_action(obs_batch)
+                # result,stiffness_unnorm,raw_pred = policy.predict_action(obs_batch)
                 # print("Predicted raw action:", raw_pred)
                 # time 维长度是 sparse_action_horizon
+
+                result = policy.predict_action(obs_batch)
 
                 all_pred_actions = result['sparse'].squeeze(0).cpu().numpy()
                 # 9 for reference pose, 9 for virtual target, 1 for stiffness
 
-                all_pred_stiff_raw = stiffness_unnorm.squeeze(0).cpu().numpy()
+                # all_pred_stiff_raw = stiffness_unnorm.squeeze(0).cpu().numpy()
 
                 # ========================================
                 # 🔥 新增：将相对动作转换为绝对动作
@@ -345,7 +371,7 @@ def evaluate():
             K_ROT = 500   # 旋转刚度
 
             # 计算 k_low (模型输出 0~1 映射到 K_MIN~K_MAX)
-            k_low = K_MIN + stiffness_val * (K_MAX - K_MIN)
+            # k_low = K_MIN + stiffness_val * (K_MAX - K_MIN)
             # k_low = K_MIN + stiffness_unnorm * (K_MAX - K_MIN)
 
             # print("stiffness raw:", stiffness_unnorm)
@@ -394,7 +420,7 @@ def evaluate():
 
             print(f"Step {t}:")
             print(f"Executing Action: {step_action} \n Force Frame: {force_frame}\n Stiffness: {stiffness_vector}")
-            input("press Enter to continue...")
+            # input("press Enter to continue...")
 
             # 接下来需要把数据（处理后）传给agent
             agent.action(step_action,force_frame,stiffness_vector,rotation_rep = "rotation_6d")
