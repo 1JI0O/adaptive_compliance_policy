@@ -48,7 +48,7 @@ dataset_path = "/data/haoxiang/acp/acp_processed/flipup_v3"
 episode_id = "episode_1" 
 
 # 超参数
-n_action_steps = 8
+n_action_steps = 1
 sparse_obs_rgb_down_sample_steps = 1
 sparse_obs_rgb_horizon = 2
 sparse_obs_low_dim_down_sample_steps = 1
@@ -98,57 +98,101 @@ class DatasetReplayer:
             self.ts_pose_vt_0 = None
             self.stiffness_0 = None
         
-        self.total_steps = len(self.robot_time_stamps_0)
+        # self.total_steps = len(self.robot_time_stamps_0) # 这个有大问题！
+        self.total_steps = len(self.rgb_time_stamps_0)
         print(f"Loaded {self.total_steps} timesteps")
         print(f"  RGB_0 shape: {self.rgb_0.shape}")
         print(f"  RGB_1 shape: {self.rgb_1.shape}")
         print(f"  Pose shape: {self.ts_pose_fb_0.shape}")
         print(f"  Wrench shape: {self.wrench_filtered.shape}")
         
+    # def get_obs_at_step(self, t):
+    #     """
+    #     获取第 t 步的观测数据
+        
+    #     Returns:
+    #         rgb_0: (H, W, 3) uint8
+    #         rgb_1: (H, W, 3) uint8
+    #         pos: (3,) float
+    #         rot6d: (6,) float
+    #         wrench: (6,) float
+    #     """
+    #     # 1. RGB 图像
+    #     rgb_0 = self.rgb_0[t]  # (H, W, 3)
+    #     rgb_1 = self.rgb_1[t]  # (H, W, 3)
+        
+    #     # 2. 位置和旋转
+    #     pose7 = self.ts_pose_fb_0[t]  # [x, y, z, qw, qx, qy, qz]
+    #     pos = pose7[:3]
+    #     quat = pose7[3:]  # [qw, qx, qy, qz]
+        
+    #     # 转换为 rotation 6d
+    #     # quat 格式：[qw, qx, qy, qz]
+    #     r = R.from_quat([quat[1], quat[2], quat[3], quat[0]])  # scipy 格式: [qx,qy,qz,qw]
+    #     rot_mat = r.as_matrix()
+    #     rot6d = su.SO3_to_rot6d(rot_mat)
+        
+    #     # 3. 力/力矩
+    #     wrench = self.wrench_filtered[t]
+        
+    #     return rgb_0,rgb_1, pos, rot6d, wrench
+
     def get_obs_at_step(self, t):
         """
-        获取第 t 步的观测数据
-        
-        Returns:
-            rgb_0: (H, W, 3) uint8
-            rgb_1: (H, W, 3) uint8
-            pos: (3,) float
-            rot6d: (6,) float
-            wrench: (6,) float
+        修改后的逻辑：以第 t 帧图像的时间为基准，对齐其他传感器数据
         """
-        # 1. RGB 图像
-        rgb_0 = self.rgb_0[t]  # (H, W, 3)
-        rgb_1 = self.rgb_1[t]  # (H, W, 3)
+        # 1. 确定基准时间：当前图像的时间戳
+        query_time = self.rgb_time_stamps_0[t]
         
-        # 2. 位置和旋转
-        pose7 = self.ts_pose_fb_0[t]  # [x, y, z, qw, qx, qy, qz]
+        # 2. 获取图像
+        rgb_0 = self.rgb_0[t]
+        rgb_1 = self.rgb_1[t] # 假设你刚才已经按我的建议把 rgb_1 长度对齐了 rgb_0
+
+        # 3. 对齐机器人位姿 (Robot Pose)
+        # 在 robot 时间轴里找最接近 query_time 的索引
+        robot_idx = np.searchsorted(self.robot_time_stamps_0, query_time)
+        # 防止越界
+        robot_idx = min(robot_idx, len(self.ts_pose_fb_0) - 1)
+        pose7 = self.ts_pose_fb_0[robot_idx]
+        
+        # 4. 对齐力矩 (Wrench)
+        # 在 wrench 时间轴里找最接近 query_time 的索引
+        wrench_idx = np.searchsorted(self.wrench_time_stamps_0, query_time)
+        wrench_idx = min(wrench_idx, len(self.wrench_filtered) - 1)
+        wrench = self.wrench_filtered[wrench_idx]
+
+        # --- 转换位姿到 rotation 6d ---
         pos = pose7[:3]
-        quat = pose7[3:]  # [qw, qx, qy, qz]
+        quat = pose7[3:] # [qw, qx, qy, qz]
+        r = R.from_quat([quat[1], quat[2], quat[3], quat[0]]) # qx,qy,qz,qw
+        rot6d = su.SO3_to_rot6d(r.as_matrix())
         
-        # 转换为 rotation 6d
-        # quat 格式：[qw, qx, qy, qz]
-        r = R.from_quat([quat[1], quat[2], quat[3], quat[0]])  # scipy 格式: [qx,qy,qz,qw]
-        rot_mat = r.as_matrix()
-        rot6d = su.SO3_to_rot6d(rot_mat)
-        
-        # 3. 力/力矩
-        wrench = self.wrench_filtered[t]
-        
-        return rgb_0,rgb_1, pos, rot6d, wrench
+        # 🔥 关键：把这个 robot_idx 传出去，给 GT 对比用
+        return rgb_0, rgb_1, pos, rot6d, wrench, robot_idx
     
-    def get_ground_truth_action(self, t):
-        """
-        获取第 t 步的 ground truth 动作（如果有）
+    # def get_ground_truth_action(self, t):
+    #     """
+    #     获取第 t 步的 ground truth 动作（如果有）
         
-        Returns:
-            pose_command: (7,) [x,y,z,qw,qx,qy,qz]
-            pose_vt: (7,) 或 None
-            stiffness: float 或 None
+    #     Returns:
+    #         pose_command: (7,) [x,y,z,qw,qx,qy,qz]
+    #         pose_vt: (7,) 或 None
+    #         stiffness: float 或 None
+    #     """
+    #     if self.ts_pose_vt_0 is not None:
+    #         return self.ts_pose_fb_0[t], self.ts_pose_vt_0[t], self.stiffness_0[t]
+    #     else:
+    #         return self.ts_pose_fb_0[t], None, None
+
+    # 修改 DatasetReplayer 类的 get_ground_truth_action
+    def get_ground_truth_action(self, robot_idx):
+        """
+        不再接收 t，而是接收对齐后的 robot_idx
         """
         if self.ts_pose_vt_0 is not None:
-            return self.ts_pose_fb_0[t], self.ts_pose_vt_0[t], self.stiffness_0[t]
+            return self.ts_pose_fb_0[robot_idx], self.ts_pose_vt_0[robot_idx], self.stiffness_0[robot_idx]
         else:
-            return self.ts_pose_fb_0[t], None, None
+            return self.ts_pose_fb_0[robot_idx], None, None
 
 
 # ========================================
@@ -212,13 +256,13 @@ def evaluate_with_dataset():
     print("=" * 60)
     
     with torch.inference_mode():
-        for t in range(min(replayer.total_steps, 16)):  # 限制测试步数
+        for t in range(min(replayer.total_steps, 99999)):  # 限制测试步数
             print(f"\nStep {t}/{replayer.total_steps} ---------------------")
             
             # ========================================
-            # 1. 从数据集获取观测
+            # 1. 从数据集获取观测 以及拿到索引
             # ========================================
-            rgb_0_raw,rgb_1_raw ,end_pos, end_rot6d, wrench = replayer.get_obs_at_step(t)
+            rgb_0_raw, rgb_1_raw, end_pos, end_rot6d, wrench, robot_idx = replayer.get_obs_at_step(t)
             
             # 处理 RGB 图像
             # 假设数据集中已经是 224x224，如果不是需要 resize
@@ -372,7 +416,8 @@ def evaluate_with_dataset():
             # ========================================
             # 5. 获取 ground truth（如果有）
             # ========================================
-            gt_pose, gt_vt, gt_stiff = replayer.get_ground_truth_action(t)
+            # 获取 GT 时，传入对齐后的 robot_idx
+            gt_pose, gt_vt, gt_stiff = replayer.get_ground_truth_action(robot_idx)
             
             # ========================================
             # 6. 对比和记录
