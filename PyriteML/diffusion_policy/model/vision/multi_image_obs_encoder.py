@@ -125,6 +125,7 @@ class MultiImageObsEncoder(ModuleAttrMixin):
         self.key_shape_map = key_shape_map
 
     def forward(self, obs_dict):
+        print("=============================== now forwarding =======================================")
         batch_size = None
         features = list()
         # process rgb input
@@ -133,6 +134,10 @@ class MultiImageObsEncoder(ModuleAttrMixin):
             imgs = list()
             for key in self.rgb_keys:
                 img = obs_dict[key]
+
+                # 在这里加打印
+                print(f"[DEBUG] input image key={key} shape={img.shape} dtype={img.dtype} min={img.min()} max={img.max()}")
+
                 if batch_size is None:
                     batch_size = img.shape[0]
                 else:
@@ -155,6 +160,10 @@ class MultiImageObsEncoder(ModuleAttrMixin):
             # run each rgb obs to independent models
             for key in self.rgb_keys:
                 img = obs_dict[key]
+
+                # 在这里加打印
+                print(f"[DEBUG] input image key={key} shape={img.shape} dtype={img.dtype} min={img.min()} max={img.max()}")
+
                 if batch_size is None:
                     batch_size = img.shape[0]
                 else:

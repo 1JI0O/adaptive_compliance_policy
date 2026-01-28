@@ -75,28 +75,27 @@ from eval_agent import SingleArmAgent
 # sparse_action_horizon = 16
 
 # RGB（15 Hz 相机）
-sparse_obs_rgb_down_sample_steps : 1
-sparse_obs_rgb_horizon : 2
+sparse_obs_rgb_down_sample_steps = 1
+sparse_obs_rgb_horizon = 2
 
 # Pose（1000 Hz，但只需要短期）
-sparse_obs_low_dim_down_sample_steps : 1
-sparse_obs_low_dim_horizon : 3
+sparse_obs_low_dim_down_sample_steps = 1
+sparse_obs_low_dim_horizon = 3
 
 # Wrench（1000 Hz，需要长期历史 + 1D Conv 处理）
-sparse_obs_wrench_down_sample_steps : 5   # 🔥 关键：扩大时间感受野
-sparse_obs_wrench_horizon : 32            # 🔥 关键：足够的样本给 1D Conv
-
+sparse_obs_wrench_down_sample_steps = 5   # 🔥 关键：扩大时间感受野
+sparse_obs_wrench_horizon = 32            # 🔥 关键：足够的样本给 1D Conv
 # Action
-sparse_action_down_sample_steps : 1
-sparse_action_horizon : 16
+sparse_action_down_sample_steps = 1
+sparse_action_horizon = 16
 
 # 以上这些参数可以从yaml里面读取，先实现主干逻辑
 
-yaml_path = "/home/flexiv/data/acp/.hydra/config.yaml"
-ckpt_path = "/home/flexiv/data/acp/latest.ckpt"
+yaml_path = "/home/flexiv/data/acp_two_cam/.hydra/config.yaml"
+ckpt_path = "/home/flexiv/data/acp_two_cam/epoch_600.ckpt"
 max_steps = 3000
-eval_config_path = "/home/flexiv/git/adaptive_compliance_policy/eval/eval_config.yaml"
-normalizer_path = "/home/flexiv/data/acp/sparse_normalizer.pkl"
+eval_config_path = "/home/flexiv/git/acp_two_cam/eval/eval_config.yaml"
+normalizer_path = "/home/flexiv/data/acp_two_cam/sparse_normalizer.pkl"
 
 # color_path = "/data/haoxiang/acp/flip_v3/scene_0001/cam_104122060902/color/1768287143577.png"
 
@@ -107,7 +106,7 @@ normalizer_path = "/home/flexiv/data/acp/sparse_normalizer.pkl"
 # normalizer_path = "/data/haoxiang/logs/acp_logs/2026.01.20_04.50.05_flip_new_v3_conv_230/sparse_normalizer.pkl"
 
 
-n_action_steps = 8  
+n_action_steps = 1
 
 # === 初始化 Buffer ===
 # 使用 deque 来自动维护滑动窗口
@@ -119,7 +118,8 @@ buffer_wrench = deque(maxlen=sparse_obs_wrench_horizon)
 
 action_queue = deque(maxlen=100)
 
-# export PYRITE_CHECKPOINT_FOLDERS=/home/flexiv/data/acp
+# export PYRITE_CHECKPOINT_FOLDERS=/home/flexiv/data/acp_two_cam
+# export PYRITE_DATASET_FOLDERS=/home/flexiv/data/acp_two_cam
 
 def reset_buffers():
     buffer_rgb_0.clear()
@@ -209,13 +209,23 @@ def evaluate():
             # 这里需要修改agent实现
 
 
-            # 🔥 分别处理两个相机的图像
+            # # 🔥 分别处理两个相机的图像
+            # # 相机 0
+            # rgb_resized_0 = cv2.resize(rgb_raw_0, (224, 224), interpolation=cv2.INTER_AREA)
+            # rgb_0 = rgb_resized_0.transpose(2, 0, 1)  # (3, 224, 224)
+            
+            # # 相机 1
+            # rgb_resized_1 = cv2.resize(rgb_raw_1, (224, 224), interpolation=cv2.INTER_AREA)
+            # rgb_1 = rgb_resized_1.transpose(2, 0, 1)  # (3, 224, 224)
+
             # 相机 0
             rgb_resized_0 = cv2.resize(rgb_raw_0, (224, 224), interpolation=cv2.INTER_AREA)
+            rgb_resized_0 = rgb_resized_0.astype(np.float32) / 255.0  # 转为 float32 并归一化到 [0, 1]
             rgb_0 = rgb_resized_0.transpose(2, 0, 1)  # (3, 224, 224)
             
             # 相机 1
             rgb_resized_1 = cv2.resize(rgb_raw_1, (224, 224), interpolation=cv2.INTER_AREA)
+            rgb_resized_1 = rgb_resized_1.astype(np.float32) / 255.0  # 转为 float32 并归一化到 [0, 1]
             rgb_1 = rgb_resized_1.transpose(2, 0, 1)  # (3, 224, 224)
 
             proprio = agent.get_proprio() # [x, y, z, rot6d, gripper]
@@ -281,6 +291,8 @@ def evaluate():
                     }
                 }
 
+
+
                 # result,stiffness_unnorm,raw_pred = policy.predict_action(obs_batch)
                 # print("Predicted raw action:", raw_pred)
                 # time 维长度是 sparse_action_horizon
@@ -290,7 +302,7 @@ def evaluate():
                 all_pred_actions = result['sparse'].squeeze(0).cpu().numpy()
                 # 9 for reference pose, 9 for virtual target, 1 for stiffness
 
-                all_pred_stiff_raw = stiffness_unnorm.squeeze(0).cpu().numpy()
+                # all_pred_stiff_raw = stiffness_unnorm.squeeze(0).cpu().numpy()
 
                 # ========================================
                 # 🔥 新增：将相对动作转换为绝对动作
@@ -329,9 +341,32 @@ def evaluate():
 
                 all_pred_actions_absolute = np.array(all_pred_actions_absolute)
 
-                print(all_pred_actions)
-                print("=" * 60)
-                print(all_pred_actions_absolute)
+                                # 🔥 [改进版] 保存数据用于本地分析和训练
+                # =======================================================
+                save_dir = "eval_data_logs_0127"
+                os.makedirs(save_dir, exist_ok=True)
+
+                # 1. 准备输入数据 (Numpy 格式)
+                numpy_batch = {k: v.detach().cpu().numpy() for k, v in obs_batch['sparse'].items()}
+
+                # 2. 打包所有信息
+                save_data = {
+                    'obs_batch': numpy_batch,           # 输入
+                    'base_pose9': base_pose9,            # 还原基准
+                    'pred_action_rel': all_pred_actions, # 模型原始输出
+                    'pred_action_abs': all_pred_actions_absolute, # 最终执行指令
+                    'step_t': t
+                }
+
+                # 3. 保存 (建议使用 .npz 压缩，或者 .npy)
+                save_path = os.path.join(save_dir, f"rollout_step_{t}.npy")
+                np.save(save_path, save_data)
+                
+                print(f"💾 Full debug data saved to {save_path}")
+
+                # print(all_pred_actions)
+                # print("=" * 60)
+                # print(all_pred_actions_absolute)
 
                 # 只执行前 n_action_steps
                 # steps_to_execute = all_pred_actions[:n_action_steps]

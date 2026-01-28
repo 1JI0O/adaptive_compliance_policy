@@ -34,7 +34,7 @@ from scipy.spatial.transform import Rotation as R
 
 from PyriteUtility.computer_vision.imagecodecs_numcodecs import register_codecs
 
-device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # ========================================
 # 配置路径
@@ -48,7 +48,7 @@ dataset_path = "/data/haoxiang/acp/acp_processed/flipup_v3"
 episode_id = "episode_1" 
 
 # 超参数
-n_action_steps = 1
+n_action_steps = 4
 sparse_obs_rgb_down_sample_steps = 1
 sparse_obs_rgb_horizon = 2
 sparse_obs_low_dim_down_sample_steps = 1
@@ -105,6 +105,22 @@ class DatasetReplayer:
         print(f"  RGB_1 shape: {self.rgb_1.shape}")
         print(f"  Pose shape: {self.ts_pose_fb_0.shape}")
         print(f"  Wrench shape: {self.wrench_filtered.shape}")
+
+        # =========================================================
+        # 🔥 DEBUG: 打印 Zarr 中原始数据的统计信息
+        # =========================================================
+        print("\n" + "="*40)
+        print("🔍 [DEBUG] Zarr Raw Data Statistics")
+        print("="*40)
+        print(f"RGB_0 Type: {self.rgb_0.dtype}")
+        print(f"RGB_0 Range: Min={self.rgb_0.min()}, Max={self.rgb_0.max()}")
+        print(f"RGB_0 Shape: {self.rgb_0.shape}")
+        
+        if self.rgb_0.max() > 1.5:
+            print("👉 Zarr stores images as [0, 255] (uint8).")
+        else:
+            print("👉 Zarr stores images as [0, 1] (float).")
+        print("="*40 + "\n")
         
     # def get_obs_at_step(self, t):
     #     """
@@ -256,7 +272,7 @@ def evaluate_with_dataset():
     print("=" * 60)
     
     with torch.inference_mode():
-        for t in range(min(replayer.total_steps, 99999)):  # 限制测试步数
+        for t in range(min(replayer.total_steps, 999)):  # 限制测试步数
             print(f"\nStep {t}/{replayer.total_steps} ---------------------")
             
             # ========================================
@@ -270,13 +286,16 @@ def evaluate_with_dataset():
                 import cv2
                 rgb_0_raw = cv2.resize(rgb_0_raw, (224, 224), interpolation=cv2.INTER_AREA)
             
-            rgb_0 = rgb_0_raw.transpose(2, 0, 1)  # HWC -> CHW
+            # rgb_0 = rgb_0_raw.transpose(2, 0, 1)  # HWC -> CHW
+            rgb_0 = rgb_0_raw.transpose(2, 0, 1).astype(np.float32) / 255.0
 
             if rgb_1_raw.shape[:2] != (224, 224):
                 import cv2
                 rgb_1_raw = cv2.resize(rgb_1_raw, (224, 224), interpolation=cv2.INTER_AREA)
             
-            rgb_1 = rgb_1_raw.transpose(2, 0, 1)  # HWC -> CHW
+            # rgb_1 = rgb_1_raw.transpose(2, 0, 1)  # HWC -> CHW
+            rgb_1 = rgb_1_raw.transpose(2, 0, 1).astype(np.float32) / 255.0
+
             
             # ========================================
             # 2. 添加到 buffer
@@ -290,18 +309,52 @@ def evaluate_with_dataset():
             if t % sparse_obs_wrench_down_sample_steps == 0:
                 buffer_wrench.append(wrench)
             
-            # 第一帧填充
+            # # 第一帧填充
+            # if t == 0:
+            #     print(f"t = 0 end pose {end_pos}")
+            #     while len(buffer_rgb_0) < sparse_obs_rgb_horizon:
+            #         buffer_rgb_0.append(rgb_0)
+            #     while len(buffer_rgb_1) < sparse_obs_rgb_horizon:
+            #         buffer_rgb_1.append(rgb_1)
+            #     while len(buffer_pos) < sparse_obs_low_dim_horizon:
+            #         buffer_pos.append(end_pos)
+            #     while len(buffer_rot) < sparse_obs_low_dim_horizon:
+            #         buffer_rot.append(end_rot6d)
+            #     while len(buffer_wrench) < sparse_obs_wrench_horizon:
+            #         buffer_wrench.append(wrench)
+
+            # Padding: 如果是第一帧，手动构造一个“向 +Y 方向缓慢起步”的历史
             if t == 0:
-                while len(buffer_rgb_0) < sparse_obs_rgb_horizon:
-                    buffer_rgb_0.append(rgb_0)
-                while len(buffer_rgb_1) < sparse_obs_rgb_horizon:
-                    buffer_rgb_1.append(rgb_1)
-                while len(buffer_pos) < sparse_obs_low_dim_horizon:
-                    buffer_pos.append(end_pos)
-                while len(buffer_rot) < sparse_obs_low_dim_horizon:
+                # 1. 图像和力矩保持原样填充
+                while len(buffer_rgb_0) < sparse_obs_rgb_horizon: buffer_rgb_0.append(rgb_0)
+                while len(buffer_rgb_1) < sparse_obs_rgb_horizon: buffer_rgb_1.append(rgb_1)
+                while len(buffer_wrench) < sparse_obs_wrench_horizon: buffer_wrench.append(wrench)
+                
+                # 2. 🔥 核心修改：构造 Y 轴正向滑动的历史轨迹
+                # 设定每帧前进 2mm 到 3mm，这个速度比较“慢慢”且足以激活模型
+                step_size = 0.003  # 3mm 每帧
+                
+                buffer_pos.clear()
+                buffer_rot.clear()
+                
+                # 先清空，防止刚才外部已经 append 了一帧导致顺序乱掉
+                buffer_pos.clear()
+                buffer_rot.clear()
+                
+                for i in range(sparse_obs_low_dim_horizon):
+                    # 计算偏移量：
+                    # i=0 (最老的一帧): 偏移量最大 (比如 horizon=3, i=0, offset=2)
+                    # i=horizon-1 (最新的一帧): 偏移量为 0
+                    offset_count = (sparse_obs_low_dim_horizon - 1) - i
+                    
+                    temp_pos = end_pos.copy()
+                    temp_pos[1] -= offset_count * step_size # 向 Y 负方向回退
+                    
+                    buffer_pos.append(temp_pos)
                     buffer_rot.append(end_rot6d)
-                while len(buffer_wrench) < sparse_obs_wrench_horizon:
-                    buffer_wrench.append(wrench)
+
+                print(f"🚀 +Y Kickstart: Filled {len(buffer_pos)} steps. "
+                      f"Simulated motion from Y={buffer_pos[0][1]:.4f} to Y={buffer_pos[-1][1]:.4f}")
             
             # 等待 buffer 填满
             if len(buffer_pos) < sparse_obs_low_dim_horizon:
@@ -324,6 +377,18 @@ def evaluate_with_dataset():
                 # ✅ 新增：观测相对化（和训练时一致）
                 # ========================================
                 # 获取基准帧（观测序列的最后一帧）
+                
+                # 打印buffer_pos，格式清晰易读
+                print(f"buffer_pos_step {t} : ")
+                # 遍历deque中的每个元素，按idx标注输出
+                for idx, pos in enumerate(buffer_pos):
+                    # 格式化数值（保留8位小数，和之前格式一致）
+                    pos_str = " ".join([f"{num:.8f}".rstrip('0').rstrip('.') if '.' in f"{num:.8f}" else f"{num:.8f}" 
+                                    for num in pos])
+                    print(f"idx = {idx}: [{pos_str}]")
+                # 可选：空一行分隔，更整洁
+                print()
+
                 base_pos = buffer_pos[-1]
                 base_rot6d = buffer_rot[-1]
                 base_pose9 = np.concatenate([base_pos, base_rot6d])
@@ -399,19 +464,50 @@ def evaluate_with_dataset():
                     all_pred_actions_absolute.append(absolute_action)
                 
                 all_pred_actions_absolute = np.array(all_pred_actions_absolute)
+
+                # print(f"t = {t} all action pred absolute")
+                # np.set_printoptions(threshold=np.inf, linewidth=np.inf)
+                # print(all_pred_actions_absolute)
+
+                print(f"t = {t} all action pred absolute (仅显示前3项)")
+                np.set_printoptions(threshold=np.inf, linewidth=np.inf)
+                # 核心修改：截取每个元素的前3项
+                for idx, action in enumerate(all_pred_actions_absolute):
+                    # 只取前3个元素，保持原数值格式
+                    first_three = action[9:12]
+                    print(f"idx = {idx}: {first_three}")
+
+                # input("press enter")
                 
                 steps_to_execute = all_pred_actions_absolute[:n_action_steps]
                 for act in steps_to_execute:
                     action_queue.append(act)
             
-            # ========================================
-            # 4. 从队列取出一个动作
-            # ========================================
-            if len(action_queue) == 0:
-                continue
             
             predicted_action = action_queue.popleft()
-            print(f"{t} pred action: \n {predicted_action}")
+            # print(f"{t} pred action: \n {predicted_action}")
+
+            
+            current_pos = buffer_pos[-1] # 当前物理位置
+            
+            pred_ref_pos = predicted_action[0:3]   # 参考位姿 (Ref)
+            pred_vt_pos = predicted_action[9:12]   # 虚拟目标 (VT) - 真正的吸引子
+            pred_stiff = predicted_action[18]      # 刚度
+            
+            # 计算 VT 对当前的牵引向量 (Attraction Vector)
+            delta_vt = pred_vt_pos - current_pos
+            
+            # (可选) 计算 Ref 的位移，仅作参考
+            delta_ref = pred_ref_pos - current_pos
+
+            print(f"\nStep {t} Action Detail:")
+            print(f"  Current Pos:     [{current_pos[0]:.6f}, {current_pos[1]:.6f}, {current_pos[2]:.6f}]")
+            print(f"  Pred VT (Goal):  [{pred_vt_pos[0]:.6f}, {pred_vt_pos[1]:.6f}, {pred_vt_pos[2]:.6f}]")
+            print(f"  👉 Pulling (mm): [{delta_vt[0]*1000:.3f}, {delta_vt[1]*1000:.3f}, {delta_vt[2]*1000:.3f}]")
+            print(f"  Pred Stiffness:  {pred_stiff:.2f}")
+            print(f"  (Ref Motion mm): [{delta_ref[0]*1000:.3f}, {delta_ref[1]*1000:.3f}, {delta_ref[2]*1000:.3f}]")
+
+            # input("press enter")
             
             # ========================================
             # 5. 获取 ground truth（如果有）
@@ -487,7 +583,7 @@ def evaluate_with_dataset():
     print("Keys in results:", results.keys())
     print("================================\n")
 
-    input("press enter")
+    # input("press enter")
 
     if len(results['ground_truth_vt']) > 0:
         # 转换为 numpy 数组

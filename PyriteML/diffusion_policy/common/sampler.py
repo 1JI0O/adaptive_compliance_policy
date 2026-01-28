@@ -239,7 +239,7 @@ class SequenceSampler:
                     data_episode["obs"][f"wrench_time_stamps_{id}"], query_time
                 )
                 found_time = data_episode["obs"][f"wrench_time_stamps_{id}"][query_id]
-                if abs(found_time - query_time) > 10.0:
+                if abs(found_time - query_time) > 20.0:
                     print("query_time: ", query_time)
                     print(
                         "total time: ",
@@ -259,7 +259,7 @@ class SequenceSampler:
                     data_episode["obs"][f"robot_time_stamps_{id}"], query_time
                 )
                 found_time = data_episode["obs"][f"robot_time_stamps_{id}"][query_id]
-                if abs(found_time - query_time) > 10.0:
+                if abs(found_time - query_time) > 20.0:
                     print("processing key: ", key)
                     raise ValueError(
                         f"[sampler] {episode} Warning: closest robot data point at {found_time} is far from query_time {query_time}"

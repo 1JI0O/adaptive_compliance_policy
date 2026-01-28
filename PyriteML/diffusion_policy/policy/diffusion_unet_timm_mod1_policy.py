@@ -162,6 +162,14 @@ class DiffusionUnetTimmMod1Policy(BaseImagePolicy):
         ##
         nobs_sparse = self.sparse_normalizer.normalize(obs_dict_sparse)
 
+        for k, v in nobs_sparse.items():
+            # 只打印图像类型的key
+            if "rgb_0" in k or "image" in k:
+                print(
+                    f"[DEBUG]: key={k}, shape={v.shape}, dtype={v.dtype}, min={v.min()}, max={v.max()}",
+                    flush=True
+                )
+
         batch_size = next(iter(nobs_sparse.values())).shape[0]
 
         # condition through global feature
