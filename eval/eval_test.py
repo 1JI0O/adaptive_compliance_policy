@@ -39,25 +39,30 @@ device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
 # ========================================
 # 配置路径
 # ========================================
-yaml_path = "/data/haoxiang/logs/acp_logs/2026.01.25_02.48.48_flipup_v3_conv_230/.hydra/config.yaml"
-ckpt_path = "/data/haoxiang/logs/acp_logs/2026.01.25_02.48.48_flipup_v3_conv_230/checkpoints/latest.ckpt"
-normalizer_path = "/data/haoxiang/logs/acp_logs/2026.01.25_02.48.48_flipup_v3_conv_230/sparse_normalizer.pkl"
+yaml_path = "/data/haoxiang/logs/acp_charger_logs/2026.01.26_13.37.43_charger_v2_conv_conv_230/.hydra/config.yaml"
+ckpt_path = "/data/haoxiang/logs/acp_charger_logs/2026.01.26_13.37.43_charger_v2_conv_conv_230/checkpoints/latest.ckpt"
+normalizer_path = "/data/haoxiang/logs/acp_charger_logs/2026.01.26_13.37.43_charger_v2_conv_conv_230/sparse_normalizer.pkl"
 
 # 数据集路径
-dataset_path = "/data/haoxiang/acp/acp_processed/flipup_v3"  
+dataset_path = "/data/haoxiang/data/charger_v2_acp_processed"  
 episode_id = "episode_1" 
 
 # 超参数
-n_action_steps = 1
-sparse_obs_rgb_down_sample_steps = 1
-sparse_obs_rgb_horizon = 2
-sparse_obs_low_dim_down_sample_steps = 1
-sparse_obs_low_dim_horizon = 3
-sparse_obs_wrench_down_sample_steps = 5
-sparse_obs_wrench_horizon = 32
-sparse_action_horizon = 16
-sparse_action_down_sample_steps = 1
+n_action_steps = 4
+sparse_obs_rgb_down_sample_steps =  1
+sparse_obs_rgb_horizon =  3
 
+# Pose（1000 Hz，但只需要短期）
+sparse_obs_low_dim_down_sample_steps =  20
+sparse_obs_low_dim_horizon = 3
+
+# Wrench（1000 Hz，需要长期历史 + 1D Conv 处理）
+sparse_obs_wrench_down_sample_steps = 20   # 🔥 关键：扩大时间感受野
+sparse_obs_wrench_horizon = 32            # 🔥 关键：足够的样本给 1D Conv
+
+# Action
+sparse_action_down_sample_steps = 50
+sparse_action_horizon = 16
 # ========================================
 # 数据加载器
 # ========================================
@@ -270,14 +275,16 @@ def evaluate_with_dataset():
                 import cv2
                 rgb_0_raw = cv2.resize(rgb_0_raw, (224, 224), interpolation=cv2.INTER_AREA)
             
-            rgb_0 = rgb_0_raw.transpose(2, 0, 1)  # HWC -> CHW
+            # rgb_0 = rgb_0_raw.transpose(2, 0, 1)  # HWC -> CHW
+            rgb_0 = rgb_0_raw.transpose(2, 0, 1).astype(np.float32) / 255.0
 
             if rgb_1_raw.shape[:2] != (224, 224):
                 import cv2
                 rgb_1_raw = cv2.resize(rgb_1_raw, (224, 224), interpolation=cv2.INTER_AREA)
             
-            rgb_1 = rgb_1_raw.transpose(2, 0, 1)  # HWC -> CHW
-            
+            # rgb_1 = rgb_1_raw.transpose(2, 0, 1)  # HWC -> CHW
+            rgb_1 = rgb_1_raw.transpose(2, 0, 1).astype(np.float32) / 255.0
+
             # ========================================
             # 2. 添加到 buffer
             # ========================================
